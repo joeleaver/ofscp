@@ -1,4 +1,8 @@
 {
   "clientMessageId": "cmsg_dm_001",
-  "content": { "text": "hey, are we still on for tomorrow?", "mime": "text/plain" }
+  "to": "bob@b.com",
+  "content": {
+    "text": "hey, are we still on for tomorrow?",
+    "mime": "text/plain"
+  }
 }

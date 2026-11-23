@@ -1319,6 +1319,7 @@ The `type` field **MUST** be one of the following standardized strings.
 | `reaction.removed` | A reaction was removed from a message. | `WsReactionRemoved` |
 | `channel.typing` | Typing indicator event for a channel. | `WsChannelTyping` |
 | `dm.message` | A direct message was delivered to your inbox (§7.4). | `WsDmMessage` |
+| `dm.conversation` | One of your own conversations was created or updated by a send from any of your devices (§7.4). | `WsDmConversation` |
 | `presence.subscribed` | Acknowledgement of a successful `presence.subscribe`. | `WsPresenceSubscribed` |
 | `presence.unsubscribed` | Acknowledgement of a successful `presence.unsubscribe`. | `WsPresenceUnsubscribed` |
 | `presence.update` | A subscribed user's presence changed (§7.5). | `WsPresenceUpdate` |
@@ -1642,7 +1643,9 @@ dmId:             dm_c2a3a0d4bc7aa54700d2f412c42fc0155df6071e502977e4988933eef7e
 
 #### Source of truth & sender copies (Normative)
 
-Per §8.3, the **recipient's home provider is the sole authoritative store** for a DM. OFSCP v0.1 keeps **no sender copy**: a provider stores a DM only in the *recipient's* inbox. `GET /api/dms/{dmId}/messages` returns the authenticated participant's full conversation view that the queried provider can serve: messages they *received* (held in their own inbox) **and** messages they *sent* (rows authored by them that reside in the counterparty's inbox held on this provider), ordered together within the shared cursor space (§7.2). A provider **MUST** restrict access to the conversation's two participants. A client **MAY** retain its own sent messages locally as an offline cache / optimistic echo keyed by `clientMessageId`, but this is no longer required for a participant to read back their sent history that the queried provider holds.
+Per §8.3, the **recipient's home provider is the sole authoritative store** for a DM. OFSCP v0.1 keeps **no sender copy**: a provider stores a DM only in the *recipient's* inbox. `GET /api/dms/{dmId}/messages` returns the authenticated participant's full conversation view that the queried provider can serve: messages they *received* (held in their own inbox) **and** messages they *sent* (rows authored by them that reside in the counterparty's inbox held on this provider), ordered together within the shared cursor space (§7.2). A provider **MUST** restrict access to the conversation's two participants. A client **MAY** retain its own sent messages locally as an offline cache / optimistic echo keyed by `clientMessageId`, but it never needs to: sent history is always readable from the counterparty's provider (*Reading a whole conversation*, below).
+
+The sender's home provider holds no copy of a sent message, but it **does** hold a **conversation pointer** (below): a record that the user has a conversation with someone, with a cached, **non-authoritative** preview of the last message they sent. This is what makes conversations the user started appear in their list on every device, without making the sender's provider a second store.
 
 #### Sending
 
@@ -1653,19 +1656,42 @@ POST /api/federation/dms/{dmId}/messages
 X-OFSCP-Signature: <signed per §4.4>
 Content-Type: application/json
 
-{ "clientMessageId": "cmsg_dm_001", "content": { "mime": "text/plain", "text": "hey, are we still on for tomorrow?" } }
+{ "clientMessageId": "cmsg_dm_001", "to": "bob@b.com", "content": { "mime": "text/plain", "text": "hey, are we still on for tomorrow?" } }
 ```
 
 This is the single send path whether the recipient is remote or local to the sender's provider (in the local case the recipient's home provider *is* the sender's own). The receiving provider:
 
 * authenticates the signer as the message author (§4.5);
-* identifies the recipient as the **local** user `u` for which `{dmId}` equals the id derived from `{author, u}` (§2.2: `u` is `handle@`*this provider's authority*). Because the `dmId` is a one-way hash, the provider finds `u` by deriving the id for its local users (it **MAY** maintain an index of previously seen `(dmId → user)` pairs to avoid recomputation);
-* **MUST** reject with **`400`** if no local user matches — this prevents writing into a conversation the author is not part of (inbox poisoning);
-* applies `(author, dmId, clientMessageId)` idempotency (§7.1), stores the message in the recipient's inbox, and emits `dm.message` to the recipient's subscribers.
+* identifies the recipient. Clients **SHOULD** name it in `to`; the provider then **MUST** check that `to` is one of its local users and that `{dmId}` equals the id derived from `{author, to}`. Without `to`, the recipient is the **local** user `u` for which `{dmId}` equals the id derived from `{author, u}` (§2.2: `u` is `handle@`*this provider's authority*); because the `dmId` is a one-way hash, the provider finds `u` by deriving the id for its local users (it **MAY** maintain an index of previously seen `(dmId → user)` pairs);
+* **MUST** reject with **`400`** if `to` fails those checks, or (without `to`) no local user matches — this prevents writing into a conversation the author is not part of (inbox poisoning);
+* applies `(author, dmId, clientMessageId)` idempotency (§7.1), stores the message in the recipient's inbox, and emits `dm.message` to the recipient's subscribers;
+* if the author is **also a local user** (both participants on this provider), records the author's conversation pointer itself and emits `dm.conversation` to the author (below).
+
+#### Conversation pointers (Normative)
+
+After a successful delivery to **another** provider, the sending client **SHOULD** record the conversation at its own home provider:
+
+```http
+PUT /api/me/dms/{dmId}
+X-OFSCP-Signature: <signed per §4.4>
+Content-Type: application/json
+
+{ "with": "bob@b.com", "lastMessage": { "id": "msg_77", "author": "alice@a.com", "type": "message", "content": { "mime": "text/plain", "text": "hey, are we still on for tomorrow?" }, "attachments": [], "createdAt": "2026-01-05T18:42:00Z", "metadata": [] } }
+```
+
+* `with` is the counterparty actor; the provider **MUST** reject with **`400`** unless `{dmId}` equals the id derived from `{caller, with}`.
+* `lastMessage` is OPTIONAL: the canonical message the recipient's provider returned for the send. If present it **MUST** be authored by the caller (`400` otherwise). It is a cached preview only — the authoritative copy stays in the counterparty's inbox, and providers **MUST NOT** serve it as history.
+* The provider creates or updates the pointer, sets its `updatedAt` to now, and emits `dm.conversation` with `{ "conversation": DmConversation }` to **all** of the caller's connections, so their other devices learn of conversations and messages sent elsewhere. **`200 OK`** returns the same `DmConversation`. It is a signed local-account endpoint (remote actors receive `403`) and idempotent.
+
+A pointer is best-effort convenience: if recording it fails, nothing is lost but the listing on other devices.
+
+#### Reading a whole conversation
+
+Because each DM lives only in its recipient's inbox, a participant's received messages are on their own home provider and their sent messages are on the counterparty's. To show a whole conversation a client reads `GET /api/dms/{dmId}/messages` from **both** providers (each returns what it holds for the caller, see below) and merges the two by `createdAt`, de-duplicating by message `id`. When both participants are on the same provider, one read returns everything.
 
 #### Listing & reading
 
-* `GET /api/me/dms` — paginated list of the authenticated user's DM conversations (`DmConversation` summaries: `id`, `participants`, optional `lastMessage`, `updatedAt`), using the opaque-cursor paging of §7.2.
+* `GET /api/me/dms` — paginated list of the authenticated user's DM conversations (`DmConversation` summaries: `id`, `participants`, optional `lastMessage`, `updatedAt`), newest activity first, using the opaque-cursor paging of §7.2. It includes every conversation with a message in the user's inbox **and** every conversation pointer; `lastMessage` is the newer of the last received message and the pointer's cached sent message.
 * `GET /api/dms/{dmId}/messages?cursor=…&direction=…&limit=…` — paginated message history for the conversation: the authenticated participant's full view the queried provider can serve (messages they received, plus messages they sent that reside in the counterparty's inbox held on this provider — see *Source of truth & sender copies*), with the same cursor space and response shape as §7.2. Providers **MUST** restrict access to the conversation's participants (**`403`** otherwise) and return **`404`** for an unknown `dmId`.
 
 #### Real-time
@@ -1900,7 +1926,7 @@ The local DM lifecycle (conversation id derivation, listing, reading, real-time)
 
 * **Source of Truth:** The recipient's home provider is the authoritative store for that user's inbox. v0.1 keeps **no sender copy** — a DM is stored only in the recipient's inbox (§7.4).
 * **Conversation id:** `{dmId}` is derived deterministically from the two participants (§7.4); both parties compute it identically without coordination.
-* **Client-to-Remote Delivery:** Clients **MUST** deliver DMs directly to the recipient's home provider via `POST /api/federation/dms/{dmId}/messages`, user-signed (§4.4). The body is a single message (`clientMessageId`, `content`, optional `attachments` and `reference`).
+* **Client-to-Remote Delivery:** Clients **MUST** deliver DMs directly to the recipient's home provider via `POST /api/federation/dms/{dmId}/messages`, user-signed (§4.4). The body is a single message (`clientMessageId`, `content`, optional `to`, `attachments` and `reference`). After delivering, the client records a conversation pointer at its own home provider (§7.4).
 * **Verification:** The receiving provider **MUST** reject the delivery with **`400`** when `{dmId}` does not equal the id derived from `{author, recipient}`, preventing delivery into a conversation the author is not part of.
 * **Storage:** The recipient's provider stores the message in the recipient's inbox and emits `dm.message` to the recipient's subscribers (§7.4).
 * **Reactions (OPTIONAL):** A DM reaction is stored alongside its target message — i.e. on the provider that holds that message (the source of truth above). Add/remove therefore follow the **same client→provider delivery path as the DM message**: the reacting client signs (§4.4) and delivers to the message's home provider (e.g. `PUT|DELETE /api/federation/dms/{dmId}/messages/{messageId}/reactions/{key}`), which stores it and emits `dm.reaction` (§7.4). No sender copy.
@@ -2220,7 +2246,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Support group and channel management (create/read/update/delete) with the permission model (§5.5)
 - [ ] Support group membership: join/leave, member listing, roles, per-group nicknames, `member.updated`, and the `request` approval flow (§5.7)
 - [ ] Support message edit (author-only, `editUntil`) and tombstone delete (§7.1)
-- [ ] Support direct messages: deterministic `dmId` derivation, inbox-only storage (no sender copy), the `{dmId}` verification on delivery, conversation listing/reading, and `dm.message` real-time delivery (§7.4)
+- [ ] Support direct messages: deterministic `dmId` derivation, inbox-only storage (no sender copy), the `{dmId}`/`to` verification on delivery, conversation pointers and `dm.conversation`, conversation listing/reading, and `dm.message` real-time delivery (§7.4)
 - [ ] Support the explicit contacts model (request/accept/remove, local and federated) backing the `contacts` visibility tier (§6.7)
 - [ ] Publish provider signing key(s) in discovery and sign provider-to-provider requests (§8.1)
 - [ ] Accept direct-WS connections from remote members — resolve remote keys via §4.6, enforce prior membership + tier at subscribe-time — and advertise `capabilities.federation.realtimeDelivery` (§8.5)
@@ -2246,7 +2272,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 
 - [ ] Support Ed25519 request signing over the §4.4.2 canonical string (fresh per-request nonce, body digest) for all authenticated requests
 - [ ] Complete the WebSocket signed-challenge handshake before sending other commands (§7.1)
-- [ ] Derive `dmId` per §7.4 and retain locally-sent DMs (no sender copy is stored server-side)
+- [ ] Derive `dmId` per §7.4 (no sender copy is stored server-side)
 - [ ] For remote channels, open the real-time WebSocket to the channel's home provider (not the user's own) and complete the §7.1 handshake there (§8.5)
 - [ ] Compose the home feed client-side by reading each followed channel live from its source (§7.6); do not rely on a server-compiled feed
 - [ ] Support all message types or graceful fallback
@@ -2256,6 +2282,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Render metadata extensions when schemas known
 - [ ] Provide UX for tiers (access + discoverability)
 - [ ] Handle federation latency + retries
+- [ ] Name the DM recipient in `to`, record a conversation pointer at the home provider after a cross-provider send, and read sent history from the counterparty's provider (§7.4)
 
 ---
 

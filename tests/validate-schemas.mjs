@@ -170,7 +170,9 @@ async function main() {
     ['tests/ws-notification-created.sample.json', 'schemas/v0.1/ws/notification-created.json'],
     ['tests/read-markers-response.sample.json', 'schemas/v0.1/read-markers-response.json'],
     ['tests/read-markers-update-request.sample.json', 'schemas/v0.1/read-markers-update-request.json'],
-    ['tests/ws-read-updated.sample.json', 'schemas/v0.1/ws/read-updated.json']
+    ['tests/ws-read-updated.sample.json', 'schemas/v0.1/ws/read-updated.json'],
+    ['tests/dm-conversation-pointer-request.sample.json', 'schemas/v0.1/dm-conversation-pointer-request.json'],
+    ['tests/ws-dm-conversation.sample.json', 'schemas/v0.1/ws/dm-conversation.json']
   ];
 
   for (const [samplePath, schemaPath] of cases) {
