@@ -187,7 +187,7 @@ Browser clients served from one origin talk directly to many providers (their ho
   * `Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS`
   * `Access-Control-Allow-Headers` including at least `content-type`, `accept`, `authorization`, `X-OFSCP-Actor`, `X-OFSCP-Provider`, `X-OFSCP-Key-ID`, `X-OFSCP-Timestamp`, `X-OFSCP-Nonce`, `X-OFSCP-Content-Digest`, `X-OFSCP-Signature`
   * `Access-Control-Max-Age` (RECOMMENDED `600`)
-* Include `Access-Control-Allow-Origin: *` on every response to a request that carried `Origin`, together with `Access-Control-Expose-Headers` listing at least the headers in the allow list above, and `Vary: Origin`.
+* Include `Access-Control-Allow-Origin: *` on every response to a request that carried `Origin`, together with `Access-Control-Expose-Headers` listing at least the headers in the allow list above plus `Retry-After` (so browser clients can honour 429/503 backoff) and `ETag`, and `Vary: Origin`.
 * **MUST NOT** send `Access-Control-Allow-Credentials` — no OFSCP credential is ambient, so none is needed, and a wildcard origin with credentials is forbidden by browsers anyway.
 
 Likewise, providers **MUST NOT** reject a WebSocket upgrade (§7.1) because of its `Origin` header; the signed `authenticate` handshake is the access control.
@@ -383,6 +383,8 @@ A provider receiving a signed request **MUST** perform the following checks **in
 Only after **all** checks pass is the request authenticated as the actor. Authorization (group/channel membership, tier, etc.) is then applied separately.
 
 **Replay store (Normative).** A provider **MUST** keep a **single** replay store covering every surface that accepts a signature: all signed REST routes, provider-signed federation requests (§8.1), and the WebSocket `authenticate` handshake (§7.1). Separate per-route or per-transport stores let a captured request be replayed against a different surface. Entries are keyed by **(signer kind, `key_id`, nonce)**, where the signer kind is *actor* (user-signed, §4.4) or *provider* (provider-signed, §8.1): the two `key_id` spaces are chosen independently and **MUST NOT** collide in the shared store.
+
+Step 4 only *checks* the store. A provider **MUST NOT** record a pair until step 7 has succeeded; it then re-checks and records the pair atomically (a concurrent copy of the request may have verified in the meantime). Recording earlier would let unauthenticated traffic fill the store, and let a forged request burn a nonce the genuine signer is about to use. The store **MUST** be bounded; when it is full the provider **MUST** fail closed — reject with **`503`** (and `Retry-After`) — rather than evict an unexpired entry, which would reopen that nonce to replay.
 
 ### 4.6. Public Key Discovery
 
@@ -1156,6 +1158,7 @@ Content-Type: application/json
 
 * `action` is `request`, `accept`, or `remove`.
 * The receiving provider authenticates the signer as `from` (§4.5), confirms `to` is one of its local users, and records the corresponding state for `to`. It **MUST** reject with **`403`** if the signer is not `from`.
+* An `accept` is valid **only** as an answer to a request `to` actually sent: the receiving provider **MUST** apply it only when `to` holds an **outgoing** `pending` entry for `from`, and otherwise **MUST** reject with **`404`** and change nothing. (Without this check, `from` could send a `request` and then `accept` it themselves, becoming an accepted contact — and passing every `contacts`-tier check — without `to`'s consent.)
 * A relationship is **accepted** — and the `contacts` tier (§6.1) satisfied — only once *both* providers hold an `accepted` record, i.e. after a `request` has been answered by an `accept` in the reverse direction.
 
 This mirrors the client-to-remote delivery model used for DMs (§8.3): the user's client, not a backend job, drives cross-provider state.
@@ -1812,6 +1815,16 @@ Authentication proves the calling provider domain; authorization is still requir
 * Providers **MUST** apply allow/deny policy for which remote providers may federate.
 * Providers **MUST** enforce channel/group tiers when serving federation traffic.
 
+#### Outbound requests (Normative)
+
+Almost every host a provider contacts is chosen by someone else: the domain in a request's `X-OFSCP-Actor` or `X-OFSCP-Provider` header (key lookups §4.6, discovery §8.1), entries in a peer's known-providers list (§8.6), a user's notification `target` (§10), or a browser's push endpoint. A provider that fetches such hosts blindly can be steered at its own loopback interface, the cloud metadata service, or an internal network (server-side request forgery). For **every** outbound request to a host it did not configure itself, a provider:
+
+* **MUST** use `https:` only.
+* **MUST** refuse the request unless the target — a literal IP, or **every** address its name resolves to — is a publicly routable unicast address. At minimum this excludes loopback (`127.0.0.0/8`, `::1`), unspecified (`0.0.0.0/8`, `::`), private (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`), link-local (`169.254.0.0/16`, `fe80::/10`), shared address space (`100.64.0.0/10`), documentation and benchmarking ranges, multicast, and reserved ranges, including the same ranges written as IPv4-mapped or NAT64 IPv6 addresses. An operator **MAY** explicitly allow specific internal peers (e.g. for development).
+* **MUST NOT** follow redirects; a `3xx` response is treated as a failed request.
+* **SHOULD** bound each request with a timeout (RECOMMENDED ≤10 seconds) and cap the response size it will read.
+* **SHOULD** rate-limit lookups triggered by inbound requests (e.g. the key re-fetch-on-failure of §4.6), so that a stream of requests naming random key ids cannot be used to make it hammer a third-party provider.
+
 ### 8.1. Provider Signing Identity
 
 Federation involves two kinds of signer:
@@ -2091,7 +2104,8 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Support password-based registration and login
 - [ ] Issue scoped, short-lived bootstrap tokens on registration/login (§4.2)
 - [ ] Implement device key registration (bootstrap-authenticated), listing, and revocation, closing revoked keys' WebSocket connections with `4003` (§4.7)
-- [ ] Validate Ed25519 request signatures over the §4.4.2 canonical string, including authority binding and nonce replay rejection, with one provider-wide replay store (§4.5)
+- [ ] Validate Ed25519 request signatures over the §4.4.2 canonical string, including authority binding and nonce replay rejection, with one bounded provider-wide replay store that records a nonce only after the signature verifies (§4.5)
+- [ ] Apply the outbound-request rules (https only, public addresses only, no redirects) to every request to a host named by someone else (§8)
 - [ ] Allow cross-origin access per §3.4 (CORS preflight and headers; no `Origin` check on WebSocket upgrades)
 - [ ] Authenticate WebSocket connections via the signed `auth.challenge`/`authenticate` handshake (§7.1)
 - [ ] Serve user public keys via the `/.well-known/ofscp/users/{handle}/keys` endpoint
