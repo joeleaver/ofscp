@@ -167,7 +167,10 @@ async function main() {
     ['tests/push-payload.sample.json', 'schemas/v0.1/push-payload.json'],
     ['tests/guest-upgrade-response.sample.json', 'schemas/v0.1/guest-upgrade-response.json'],
     ['tests/ws-member-updated.sample.json', 'schemas/v0.1/ws/member-updated.json'],
-    ['tests/ws-notification-created.sample.json', 'schemas/v0.1/ws/notification-created.json']
+    ['tests/ws-notification-created.sample.json', 'schemas/v0.1/ws/notification-created.json'],
+    ['tests/read-markers-response.sample.json', 'schemas/v0.1/read-markers-response.json'],
+    ['tests/read-markers-update-request.sample.json', 'schemas/v0.1/read-markers-update-request.json'],
+    ['tests/ws-read-updated.sample.json', 'schemas/v0.1/ws/read-updated.json']
   ];
 
   for (const [samplePath, schemaPath] of cases) {

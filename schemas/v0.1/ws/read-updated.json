@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/ws/read-updated.json",
+  "title": "OFSCP WS read.updated event (v0.1)",
+  "description": "The user's read markers advanced (§7.7); sent to all of the user's connections.",
+  "allOf": [
+    {
+      "$ref": "./envelope.json"
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "data"
+      ],
+      "properties": {
+        "type": {
+          "const": "read.updated"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "markers"
+          ],
+          "properties": {
+            "markers": {
+              "type": "array",
+              "items": {
+                "$ref": "../read-markers-response.json#/$defs/ReadMarker"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
