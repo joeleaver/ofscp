@@ -12,7 +12,16 @@
   ],
   "properties": {
     "type": {
-      "$ref": "./defs/common.json#/$defs/HttpsUri"
+      "allOf": [
+        {
+          "$ref": "./defs/common.json#/$defs/HttpsUri"
+        },
+        {
+          "type": "string",
+          "pattern": "^https://[^/]+/problems/[a-z][a-z0-9_]*$"
+        }
+      ],
+      "description": "https://{canonical authority}/problems/{errorCode} (\u00a72.6)."
     },
     "title": {
       "type": "string"
@@ -31,7 +40,7 @@
     "errorCode": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*$",
-      "description": "Registered error code (\u00a77.3). The interoperable key: clients branch on status + errorCode, never on type."
+      "description": "Registered (\u00a77.3) or extension error code. The interoperable key: clients branch on status + errorCode, never on type."
     }
   }
 }
