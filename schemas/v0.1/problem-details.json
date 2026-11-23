@@ -4,13 +4,43 @@
   "title": "RFC7807 Problem Details (with OFSCP extension) (v0.1)",
   "type": "object",
   "additionalProperties": true,
-  "required": ["type", "title", "status"],
+  "required": [
+    "type",
+    "title",
+    "status",
+    "errorCode"
+  ],
   "properties": {
-    "type": { "$ref": "./defs/common.json#/$defs/HttpsUri" },
-    "title": { "type": "string" },
-    "status": { "type": "integer", "minimum": 100, "maximum": 599 },
-    "detail": { "type": "string" },
-    "instance": { "type": "string" },
-    "errorCode": { "type": "string" }
+    "type": {
+      "allOf": [
+        {
+          "$ref": "./defs/common.json#/$defs/HttpsUri"
+        },
+        {
+          "type": "string",
+          "pattern": "^https://[^/]+/problems/[a-z][a-z0-9_]*$"
+        }
+      ],
+      "description": "https://{canonical authority}/problems/{errorCode} (\u00a72.6)."
+    },
+    "title": {
+      "type": "string"
+    },
+    "status": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 599
+    },
+    "detail": {
+      "type": "string"
+    },
+    "instance": {
+      "type": "string"
+    },
+    "errorCode": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Registered (\u00a77.3) or extension error code. The interoperable key: clients branch on status + errorCode, never on type."
+    }
   }
 }

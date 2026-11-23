@@ -3,22 +3,51 @@
   "$id": "https://example.invalid/ofscp/schemas/v0.1/ws/error.json",
   "title": "OFSCP WS error event (v0.1)",
   "allOf": [
-    { "$ref": "./envelope.json" },
+    {
+      "$ref": "./envelope.json"
+    },
     {
       "type": "object",
-      "required": ["type", "data"],
+      "required": [
+        "type",
+        "data"
+      ],
       "properties": {
-        "type": { "const": "error" },
+        "type": {
+          "const": "error"
+        },
         "data": {
           "type": "object",
           "additionalProperties": true,
-          "required": ["code", "message", "status"],
+          "required": [
+            "code",
+            "message",
+            "status"
+          ],
           "properties": {
-            "code": { "type": "string", "minLength": 1 },
-            "message": { "type": "string", "minLength": 1 },
-            "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+            "code": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "description": "An errorCode from the \u00a77.3 registry or an extension code, paired with its HTTP status."
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            },
             "details": {
-              "type": ["object", "array", "string", "number", "boolean", "null"],
+              "type": [
+                "object",
+                "array",
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ],
               "description": "Optional machine-readable error details."
             }
           }
