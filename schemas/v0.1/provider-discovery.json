@@ -45,6 +45,11 @@
             },
             "registration_endpoint": {
               "$ref": "./defs/common.json#/$defs/HttpsUri"
+            },
+            "registration": {
+              "type": "string",
+              "enum": ["open", "invite", "closed"],
+              "description": "Who may register (§4.1.1). Absent means \"open\"."
             }
           },
           "required": [

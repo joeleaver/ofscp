@@ -122,7 +122,8 @@ Content-Type: application/json
     "contact": "mailto:admin@social.example",
     "authentication": {
       "login_endpoint": "https://social.example/api/auth/login",
-      "registration_endpoint": "https://social.example/api/auth/register"
+      "registration_endpoint": "https://social.example/api/auth/register",
+      "registration": "open"
     },
     "publicKeys": [
       {
@@ -208,8 +209,8 @@ This section specifies the authentication model for OFSCP. The design prioritize
 
 #### 4.1.1. Registration
 
-1. Client sends `handle`, `password`, and an OPTIONAL `recoveryEmail` to its home provider at `POST /api/auth/register`.
-2. Provider hashes the password with Argon2id (§4.1.4) and stores the account.
+1. Client sends `handle`, `password`, an OPTIONAL `recoveryEmail`, and — for an invite-only provider — an `inviteToken` to its home provider at `POST /api/auth/register`.
+2. Provider checks its registration mode and the invite (below), then hashes the password with Argon2id (§4.1.4) and stores the account.
 3. Provider returns a **bootstrap token** (§4.2); the client proceeds to device key registration (§4.3).
 
 Request:
@@ -221,6 +222,38 @@ Response (`201 Created`):
 ```json
 { "bootstrap_token": "bt_…", "token_type": "bootstrap", "expires_in": 300 }
 ```
+
+**Registration modes.** A provider decides who may create accounts, and advertises it in discovery as `provider.authentication.registration` (§3.1):
+
+* `"open"` — anyone may register. This is the meaning when the field is absent.
+* `"invite"` — registration requires a provider-issued **account invite** (below).
+* `"closed"` — no self-registration (accounts are created by the provider's own means, e.g. an operator). A closed provider **SHOULD** omit `registration_endpoint`.
+
+Clients **SHOULD** read this before offering a sign-up form, and **MUST** still handle the errors below, since a provider's mode can change.
+
+**Account invites.** For an `"invite"` provider, the registration request carries an `inviteToken`:
+
+```json
+{ "handle": "carol", "password": "…", "inviteToken": "ai_…" }
+```
+
+* An account invite is an opaque, high-entropy (≥128 bits), single-use, time-limited token minted by the provider (how it is minted — admin tools, operator CLI — is outside this specification). It **MAY** pin a handle, in which case the request's `handle` **MUST** equal it. It is consumed atomically with the account's creation. Account invites are distinct from the group invites of §5.6.
+* A provider **SHOULD** share an account invite as a link of the form `https://{authority}/register?invite={token}`, where `{authority}` is its canonical authority (§2.2). A client handed such a link learns both the provider to register with and the token; the provider **MAY** also serve a web sign-up page at that URL.
+* An `"open"` provider **MUST NOT** reject a registration because of its `inviteToken`: it ignores the token (including any pinned handle).
+* A pinned handle **MUST** itself be a valid registration handle (§2.2.1; never `guest_…`).
+* Tokens in links leak easily. A provider serving a sign-up page at the invite URL **SHOULD** send `Referrer-Policy: no-referrer` from it, and providers **SHOULD NOT** log invite tokens. A client handed an invite link **SHOULD** show the user the provider authority it names before any password is entered, since a forged link is a ready-made phishing page.
+
+**Registration errors** (codes from §7.3). A provider **MUST** check the registration mode and the invite **before** checking whether the handle exists or hashing the password (a malformed body may still be rejected with `400` first), so that callers without a usable invite learn nothing about handles and cannot make the provider hash passwords:
+
+* `"closed"` provider → **`403`** `registration_closed`, whether or not an `inviteToken` is sent.
+* `"invite"` provider with no `inviteToken`, or one that is unknown, expired, already used, or pinned to a different handle → **`403`** `invite_required`. Providers **MUST** use this one code for all of these cases, so that responses do not reveal which tokens exist.
+* Handle already taken → **`409`** `conflict`. Invalid handle (§2.2.1) or password (§4.1.4) → **`400`** `bad_request`. (Registration necessarily reveals whether a handle exists to callers who may register; handles are public anyway, e.g. via §4.6.)
+
+Registration remains subject to the rate limits of §4.1.5.
+
+* **Guests.** The registration mode governs **full accounts**. A provider in any mode **MAY** still provision guest accounts through group invites (§4.8, §5.6), since guests are bound to one group and never federated. But turning a guest into a full account with `POST /api/me/claim` (§4.8.1) is a registration and follows the mode: a `"closed"` provider answers **`403`** `registration_closed`, and an `"invite"` provider requires an `inviteToken` in the claim request, with the same rules and errors as above. (Merging a guest into an *existing* account, `POST /api/me/merge`, creates no account and is unaffected.)
+* **Unknown modes.** A client that sees a `registration` value it does not recognise **SHOULD** treat it as `"open"` and rely on the errors above.
+* **Retries.** If a client loses the response to a successful registration and retries with the same `inviteToken`, it gets `invite_required` (the token is spent); it **SHOULD** then try logging in (§4.1.2). Login, bootstrap tokens and device keys (§4.1.2–§4.3) are unaffected by the registration mode.
 
 #### 4.1.2. Login
 
@@ -449,7 +482,7 @@ Providers **MAY** decline to support guest accounts; an invite with `grantsGuest
 
 A provider that supports guests **MAY** let a guest keep what they did as a guest by turning the guest identity into a full account. Both endpoints are signed by the guest's device key and are local-account endpoints (remote actors receive `403`). On success both return **`200 OK`** with `{ "actor", "keyId", "profile" }` — the new actor, the (unchanged) device key id, and the new `UserProfile` — and the provider closes every WebSocket connection of the old guest actor with code `4003` (§7.1), so the client reconnects as the new actor.
 
-* **`POST /api/me/claim`** — `{ "handle", "password", "displayName"? }`. Converts the guest *in place* into a full account with a newly chosen handle (§2.2.1; not starting with `guest_`) and password (§4.1.4). Every record that names the guest — memberships, authored messages and reactions, ownerships, contacts, follows, settings, DMs (with `dmId`s re-derived, §7.4), and the conversation pointers and read markers keyed by those `dmId`s — is renamed to the new actor. The device key stays bound and now signs as the new actor. Errors: `400` (invalid handle or password, or the same handle), `409` (handle taken, or the caller is not a guest).
+* **`POST /api/me/claim`** — `{ "handle", "password", "displayName"?, "inviteToken"? }`. Claim is subject to the provider's registration mode (§4.1.1). Converts the guest *in place* into a full account with a newly chosen handle (§2.2.1; not starting with `guest_`) and password (§4.1.4). Every record that names the guest — memberships, authored messages and reactions, ownerships, contacts, follows, settings, DMs (with `dmId`s re-derived, §7.4), and the conversation pointers and read markers keyed by those `dmId`s — is renamed to the new actor. The device key stays bound and now signs as the new actor. Errors: `403` `registration_closed` / `invite_required` per the registration mode (§4.1.1; checked first, under the same ordering rule as registration), `400` (invalid handle or password, or the same handle), `409` (handle taken, or the caller is not a guest).
 * **`POST /api/me/merge`** — `{ "handle", "password" }`. Folds the guest into an **existing** full account on the same provider, authenticated by that account's password. The guest's records move to the target account; where the target already has the equivalent (a membership in the same group, the same reaction, a follow of the same channel, a contact with the same user, …) the target's record wins and the guest's is dropped. The target's own profile, password and settings are not changed. Like claim, every record naming the guest is re-keyed to the target — DMs with `dmId`s re-derived, plus the conversation pointers and read markers keyed by them; for **any** user whose records are re-keyed (the target, or a third party who had conversations with both the guest and the target), a re-keyed pointer that clashes with one already keyed by the new `dmId` yields to the existing one, and of two clashing markers the further-forward is kept. Re-keyed messages are never dropped: if a moved message's idempotency key — `(author, channelId, clientMessageId)` (§7.1) or `(author, dmId, clientMessageId)` (§7.4) — collides with an existing one, the moved message's `clientMessageId` is cleared. A conversation between the guest and the target would become a conversation with oneself and is dropped. The guest's device key is re-bound to the target, and the guest account is deleted. Errors: `401` (unknown handle, account without a password, or wrong password — indistinguishable from one another), `409` (the caller is not a guest, or the target is the caller).
 
 Because guests are not federated (above), a claim or merge never has to be propagated to other providers.
@@ -1601,6 +1634,8 @@ Example:
 | 400 | `bad_request` | Invalid payload, parameters, or schema mismatch |
 | 401 | `unauthorized` | Missing or invalid signature or credentials (§4.5) |
 | 403 | `forbidden` | Authenticated, but not permitted (including federation policy, §8) |
+| 403 | `registration_closed` | This provider does not accept self-registration (§4.1.1) |
+| 403 | `invite_required` | Registration needs a valid account invite, and none was supplied or the one supplied is not usable (§4.1.1) |
 | 404 | `not_found` | No such resource, or not visible to the caller |
 | 409 | `conflict` | The request conflicts with current state (e.g. a single-use invite already used) |
 | 409 | `subscription_limit` | Too many live subscriptions on one WebSocket connection (§7.1); waiting does not help — unsubscribe from something first |
@@ -2250,7 +2285,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 
 ### Provider **MUST**
 
-- [ ] Support password-based registration and login
+- [ ] Support password-based login, and registration according to the advertised registration mode (§4.1.1)
 - [ ] Issue scoped, short-lived bootstrap tokens on registration/login (§4.2)
 - [ ] Implement device key registration (bootstrap-authenticated), listing, and revocation, closing revoked keys' WebSocket connections with `4003` (§4.7)
 - [ ] Validate Ed25519 request signatures over the §4.4.2 canonical string, including authority binding and nonce replay rejection, with one bounded provider-wide replay store that records a nonce only after the signature verifies (§4.5)
@@ -2278,7 +2313,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 
 - [ ] Maintain and share a known-providers list at `GET /api/providers`, and advertise `capabilities.discovery.sharesKnownProviders` (§8.6)
 - [ ] Compile a discovery feed at `GET /api/discover` from discoverable channels (local + known providers) as pointers, and advertise `capabilities.discovery.discoverFeed` (§11.2)
-- [ ] Offer guest upgrade via `/api/me/claim` and `/api/me/merge` (§4.8.1)
+- [ ] Offer guest upgrade via `/api/me/claim` (subject to the registration mode, §4.1.1) and `/api/me/merge` (§4.8.1)
 - [ ] Offer a notification feed with mentions, per-scope notification settings, and Web Push (§10.1–§10.3)
 - [ ] Embed DM reactions inline in DM history (§7.4)
 - [ ] Keep read markers and unread counts by message id (§7.7)
@@ -2287,6 +2322,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 
 - [ ] Support Ed25519 request signing over the §4.4.2 canonical string (fresh per-request nonce, body digest) for all authenticated requests
 - [ ] Complete the WebSocket signed-challenge handshake before sending other commands (§7.1)
+- [ ] Handle the registration-mode errors (`registration_closed`, `invite_required`) when registering or claiming a guest account (§4.1.1)
 - [ ] Derive `dmId` per §7.4 (no sender copy is stored server-side)
 - [ ] For remote channels, open the real-time WebSocket to the channel's home provider (not the user's own) and complete the §7.1 handshake there (§8.5)
 - [ ] Compose the home feed client-side by reading each followed channel live from its source (§7.6); do not rely on a server-compiled feed
@@ -2309,14 +2345,16 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 Client                          Home Provider
    |                                  |
    |  POST /api/auth/register         |
-   |  {handle, password}              |
+   |  {handle, password,              |
+   |   inviteToken?}                  |
    |--------------------------------->|
-   |                                  |  hash password
-   |                                  |  store user
-   |  200 OK                          |
+   |                                  |  check mode + invite (§4.1.1)
+   |                                  |  hash password, store user
+   |  201 {bootstrap_token}           |
    |<---------------------------------|
    |                                  |
    |  POST /api/auth/device-keys      |
+   |  Authorization: Bearer <token>   |
    |  {public_key, device_name}       |
    |--------------------------------->|
    |                                  |  store device key

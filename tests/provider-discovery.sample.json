@@ -9,7 +9,8 @@
     "contact": "mailto:admin@social.example",
     "authentication": {
       "login_endpoint": "https://social.example/api/auth/login",
-      "registration_endpoint": "https://social.example/api/auth/register"
+      "registration_endpoint": "https://social.example/api/auth/register",
+      "registration": "open"
     },
     "publicKeys": [
       {

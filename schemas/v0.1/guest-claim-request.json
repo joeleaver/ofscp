@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/guest-claim-request.json",
+  "title": "OFSCP POST /api/me/claim request (v0.1)",
+  "description": "Converts the calling guest into a full account (§4.8.1); subject to the registration mode (§4.1.1).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "handle",
+    "password"
+  ],
+  "properties": {
+    "handle": {
+      "type": "string",
+      "minLength": 1
+    },
+    "password": {
+      "type": "string",
+      "minLength": 8
+    },
+    "displayName": {
+      "type": "string"
+    },
+    "inviteToken": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Account invite, required when the registration mode is \"invite\" (§4.1.1)."
+    }
+  }
+}
