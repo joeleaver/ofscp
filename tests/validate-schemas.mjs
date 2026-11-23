@@ -156,7 +156,9 @@ async function main() {
     ['tests/device-key-response.sample.json', 'schemas/v0.1/device-key-response.json'],
     ['tests/user-keys-response.sample.json', 'schemas/v0.1/user-keys-response.json'],
     ['tests/device-keys-response.sample.json', 'schemas/v0.1/device-keys-response.json'],
-    ['tests/notifications-endpoints-response.sample.json', 'schemas/v0.1/notifications-endpoints-response.json']
+    ['tests/notifications-endpoints-response.sample.json', 'schemas/v0.1/notifications-endpoints-response.json'],
+    ['tests/dm-conversation-pointer-request.sample.json', 'schemas/v0.1/dm-conversation-pointer-request.json'],
+    ['tests/ws-dm-conversation.sample.json', 'schemas/v0.1/ws/dm-conversation.json']
   ];
 
   for (const [samplePath, schemaPath] of cases) {

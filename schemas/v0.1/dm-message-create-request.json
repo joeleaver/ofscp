@@ -12,6 +12,10 @@
       "minLength": 1,
       "description": "Client-chosen idempotency key. Providers MUST treat (author, dmId, clientMessageId) as idempotent (§7.1)."
     },
+    "to": {
+      "$ref": "./defs/identity.json#/$defs/UserRef",
+      "description": "The recipient actor (§7.4). When present the provider MUST verify it is local and that {dmId} derives from (author, to)."
+    },
     "content": { "$ref": "./defs/messaging.json#/$defs/Content" },
     "attachments": {
       "type": "array",

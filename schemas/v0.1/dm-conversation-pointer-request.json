@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/dm-conversation-pointer-request.json",
+  "title": "OFSCP PUT /api/me/dms/{dmId} request (v0.1)",
+  "description": "Records a conversation pointer on the caller's home provider (§7.4). `lastMessage` is a non-authoritative cached preview of the caller's own last sent message.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "with"
+  ],
+  "properties": {
+    "with": {
+      "$ref": "./defs/identity.json#/$defs/UserRef"
+    },
+    "lastMessage": {
+      "$ref": "./message.json"
+    }
+  }
+}
