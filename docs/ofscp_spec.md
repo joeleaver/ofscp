@@ -187,7 +187,7 @@ Browser clients served from one origin talk directly to many providers (their ho
   * `Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS`
   * `Access-Control-Allow-Headers` including at least `content-type`, `accept`, `authorization`, `X-OFSCP-Actor`, `X-OFSCP-Provider`, `X-OFSCP-Key-ID`, `X-OFSCP-Timestamp`, `X-OFSCP-Nonce`, `X-OFSCP-Content-Digest`, `X-OFSCP-Signature`
   * `Access-Control-Max-Age` (RECOMMENDED `600`)
-* Include `Access-Control-Allow-Origin: *` on every response to a request that carried `Origin`, together with `Access-Control-Expose-Headers` listing at least the headers in the allow list above, and `Vary: Origin`.
+* Include `Access-Control-Allow-Origin: *` on every response to a request that carried `Origin`, together with `Access-Control-Expose-Headers` listing at least the headers in the allow list above plus `Retry-After` (so browser clients can honour 429/503 backoff) and `ETag`, and `Vary: Origin`.
 * **MUST NOT** send `Access-Control-Allow-Credentials` — no OFSCP credential is ambient, so none is needed, and a wildcard origin with credentials is forbidden by browsers anyway.
 
 Likewise, providers **MUST NOT** reject a WebSocket upgrade (§7.1) because of its `Origin` header; the signed `authenticate` handshake is the access control.
@@ -384,6 +384,8 @@ Only after **all** checks pass is the request authenticated as the actor. Author
 
 **Replay store (Normative).** A provider **MUST** keep a **single** replay store covering every surface that accepts a signature: all signed REST routes, provider-signed federation requests (§8.1), and the WebSocket `authenticate` handshake (§7.1). Separate per-route or per-transport stores let a captured request be replayed against a different surface. Entries are keyed by **(signer kind, `key_id`, nonce)**, where the signer kind is *actor* (user-signed, §4.4) or *provider* (provider-signed, §8.1): the two `key_id` spaces are chosen independently and **MUST NOT** collide in the shared store.
 
+Step 4 only *checks* the store. A provider **MUST NOT** record a pair until step 7 has succeeded; it then re-checks and records the pair atomically (a concurrent copy of the request may have verified in the meantime). Recording earlier would let unauthenticated traffic fill the store, and let a forged request burn a nonce the genuine signer is about to use. The store **MUST** be bounded; when it is full the provider **MUST** fail closed — reject with **`503`** (and `Retry-After`) — rather than evict an unexpired entry, which would reopen that nonce to replay.
+
 ### 4.6. Public Key Discovery
 
 Home providers **MUST** expose an endpoint for fetching a user's active (non-revoked) public keys:
@@ -438,6 +440,15 @@ A guest account:
 * Is **not federated.** A guest actor **MUST NOT** be used for cross-provider requests, and remote providers **MAY** refuse to resolve or accept guest actors. The provider **MAY** still serve the guest's public key at the keys endpoint (§4.6) so that local verification works.
 
 Providers **MAY** decline to support guest accounts; an invite with `grantsGuest: false` (or a provider that does not offer guests) requires a full account to redeem.
+
+#### 4.8.1. Upgrading a guest (OPTIONAL)
+
+A provider that supports guests **MAY** let a guest keep what they did as a guest by turning the guest identity into a full account. Both endpoints are signed by the guest's device key and are local-account endpoints (remote actors receive `403`). On success both return **`200 OK`** with `{ "actor", "keyId", "profile" }` — the new actor, the (unchanged) device key id, and the new `UserProfile` — and the provider closes every WebSocket connection of the old guest actor with code `4003` (§7.1), so the client reconnects as the new actor.
+
+* **`POST /api/me/claim`** — `{ "handle", "password", "displayName"? }`. Converts the guest *in place* into a full account with a newly chosen handle (§2.2.1; not starting with `guest_`) and password (§4.1.4). Every record that names the guest — memberships, authored messages and reactions, ownerships, contacts, follows, settings, DMs (with `dmId`s re-derived, §7.4) — is renamed to the new actor. The device key stays bound and now signs as the new actor. Errors: `400` (invalid handle or password, or the same handle), `409` (handle taken, or the caller is not a guest).
+* **`POST /api/me/merge`** — `{ "handle", "password" }`. Folds the guest into an **existing** full account on the same provider, authenticated by that account's password. The guest's records move to the target account; where the target already has the equivalent (a membership in the same group, the same reaction, a follow of the same channel, a contact with the same user, …) the target's record wins and the guest's is dropped. The target's own profile, password and settings are not changed. The guest's device key is re-bound to the target, and the guest account is deleted. Errors: `401` (unknown handle, account without a password, or wrong password — indistinguishable from one another), `409` (the caller is not a guest, or the target is the caller).
+
+Because guests are not federated (above), a claim or merge never has to be propagated to other providers.
 
 ---
 
@@ -898,7 +909,7 @@ The provider binds the device key to the new guest actor; all subsequent request
 
 A **member** is `{ user, role, joinedAt }`. Roles default to `member`; canonical roles are `owner`, `admin`, `member`, and `guest`, and a group **MAY** define additional roles via its `roles` catalogue (§5.2). Each role's permissions are resolved from the group's permission map (§5.2): a role's **permission set** is the set of actions for which the role is listed, plus — for `owner` — every permission.
 
-A member **MAY** also carry an optional `displayNameOverride`: a group-scoped display name that overrides the user's global `UserProfile.displayName` (§5.1.1) within that one group, absent = use the global name. It is stored by the group's home provider and returned in member lists.
+A member **MAY** also carry an optional `displayNameOverride`: a group-scoped display name that overrides the user's global `UserProfile.displayName` (§5.1.1) within that one group, absent = use the global name. It is stored by the group's home provider and returned in member lists. It is set with `PATCH /api/groups/{groupId}/members/{userRef}/display-name` (below).
 
 Several membership mutations are constrained by a **subset (self-protect) rule**: an actor **MUST NOT** perform a mutation that touches a member holding a permission the actor does not itself hold, nor grant a role holding such a permission. Concretely, with `perms(role)` the role's permission set: a caller `C` may act on a target role `T` only when `perms(T) ⊆ perms(C)`. The `owner` holds every permission, so the owner may act on anyone; and because the owner's set is a superset of all others, no non-owner may act on the owner through these rules.
 
@@ -909,6 +920,7 @@ Requests to join a group. Behavior depends on the group's `joinPolicy` (§5.2):
 * `open` → the caller becomes a member immediately. **Response (`201 Created`):** the `Member`.
 * `request` → a pending request is recorded. **Response (`202 Accepted`):** the `JoinRequest`. An optional `{ "message": "…" }` body may accompany the request.
 * `invite` → **`403 Forbidden`**; the caller must redeem an invite (§5.6).
+* A `private`-tier group always behaves as `invite`, whatever its `joinPolicy` (§11).
 * Already a member → **`200 OK`** with the existing `Member` (idempotent).
 
 The caller may be local or remote (§8.2); a remote actor joins by signing this request directly to the group's provider.
@@ -933,6 +945,20 @@ Changes a member's `role` (promote/demote). **Authorization:** group `manage` ro
 #### DELETE /api/groups/{groupId}/members/{userRef}
 
 Removes (kicks) a member. **Authorization:** group `moderate` role, **and** the **subset rule** (§5.7): the caller **MUST** hold every permission the target holds, otherwise the provider **MUST** reject with `403`. The `owner` can never be kicked. **Response:** `204 No Content`. (Banning — preventing rejoin — is left to the moderation work in §13.)
+
+#### PATCH /api/groups/{groupId}/members/{userRef}/display-name
+
+Sets or clears a member's `displayNameOverride`. **Request:** `{ "displayNameOverride": "Ada (mod)" }`; `null`, an empty string, or only whitespace clears it. The value is trimmed and **MUST** be at most 64 characters (`400` otherwise).
+
+**Authorization:** any member may set their **own** nickname. Setting **another** member's requires the group permission action `members.set-nickname` (§5.2; it has no default grant, so only the `owner` holds it unless the group lists other roles) **and** the subset rule (§5.7) against the target's role. Remote members call this exactly like local ones (§8.2). **Response (`200 OK`):** the updated `Member`. **Errors:** `400`, `403`, `404` (no such group or member).
+
+#### `member.updated` event
+
+Whenever a member's `displayNameOverride` or `role` changes, the provider emits `member.updated` with `{ "groupId", "member": Member }` to every live subscription on the group's channels and to the affected member's own connections, so clients can update member lists and author names without re-fetching:
+
+```json
+{ "id": "evt_700", "type": "member.updated", "ts": "2026-02-01T10:00:00Z", "data": { "groupId": "grp_1", "member": { "user": "ada@a.com", "role": "member", "joinedAt": "2026-01-01T12:00:00Z", "displayNameOverride": "Ada (mod)" } } }
+```
 
 #### Join requests (for `request` policy)
 
@@ -1156,6 +1182,7 @@ Content-Type: application/json
 
 * `action` is `request`, `accept`, or `remove`.
 * The receiving provider authenticates the signer as `from` (§4.5), confirms `to` is one of its local users, and records the corresponding state for `to`. It **MUST** reject with **`403`** if the signer is not `from`.
+* An `accept` is valid **only** as an answer to a request `to` actually sent: the receiving provider **MUST** apply it only when `to` holds an **outgoing** `pending` entry for `from`, and otherwise **MUST** reject with **`404`** and change nothing. (Without this check, `from` could send a `request` and then `accept` it themselves, becoming an accepted contact — and passing every `contacts`-tier check — without `to`'s consent.)
 * A relationship is **accepted** — and the `contacts` tier (§6.1) satisfied — only once *both* providers hold an `accepted` record, i.e. after a `request` has been answered by an `accept` in the reverse direction.
 
 This mirrors the client-to-remote delivery model used for DMs (§8.3): the user's client, not a backend job, drives cross-provider state.
@@ -1296,6 +1323,9 @@ The `type` field **MUST** be one of the following standardized strings.
 | `presence.subscribed` | Acknowledgement of a successful `presence.subscribe`. | `WsPresenceSubscribed` |
 | `presence.unsubscribed` | Acknowledgement of a successful `presence.unsubscribe`. | `WsPresenceUnsubscribed` |
 | `presence.update` | A subscribed user's presence changed (§7.5). | `WsPresenceUpdate` |
+| `member.updated` | A group member's role or nickname changed (§5.7). | `WsMemberUpdated` |
+| `notification.created` | A new entry in the user's notification feed (§10.1). | `WsNotificationCreated` |
+| `read.updated` | The user's read markers advanced on another of their devices (§7.7). | `WsReadUpdated` |
 | `call.started` | A call became active in a subscribed channel. | `WsCallStarted` |
 | `call.ended` | A call ended in a subscribed channel. | `WsCallEnded` |
 | `call.participant` | A participant joined or left the call. | `WsCallParticipant` |
@@ -1703,6 +1733,8 @@ DMs reuse the message object of §5.3, so they also support reactions (§7.1), r
 * `DELETE /api/dms/{dmId}/messages/{messageId}/reactions/{key}` — remove your reaction. `204 No Content`.
 * `GET /api/dms/{dmId}/messages/{messageId}/reactions` — paginated list of `Reaction` objects for the message (history & late joiners), mirroring §7.1.
 
+Instead of (or as well as) the listing endpoint, a provider **MAY** embed a message's reactions inline: in `GET /api/dms/{dmId}/messages`, each message **MAY** carry a `reactions` array of `Reaction` objects ordered by `createdAt`, omitted when empty. Clients **MUST** accept either form; live changes always arrive as `dm.reaction` events, never inside `dm.message`.
+
 The provider emits a `dm.reaction` event mirroring the channel `reaction.added`/`reaction.removed` shape but DM-scoped, carrying the `dmId`, the `state` (`added` or `removed`), and either the full `reaction` (on add) or the `key`+`author` (on remove):
 
 ```json
@@ -1815,6 +1847,18 @@ Because reads come straight from each source, a followed channel's edits, tombst
 
 Providers **MUST NOT** be required to compile or store a feed. A provider **MAY** offer an optional convenience endpoint that fans out these reads live on the client's behalf, but it **MUST NOT** store the result, and clients **MUST NOT** depend on it existing.
 
+### 7.7. Read markers & unread counts (OPTIONAL)
+
+A provider **MAY** keep, for each of its own users, a **read marker** per *scope* — a channel it hosts (by local id) or a DM conversation in the user's inbox (by `dmId`) — recording the newest message the user has read, and derive unread counts from it. Read markers are **provider-local** in v0.1: a user's markers for a remote channel are not kept anywhere (future work, §13).
+
+A marker names a **message**, never a cursor: clients **MUST NOT** decode cursors (§2.5), and every client already holds message ids.
+
+* `GET /api/me/read-markers` — `{ "scopes": [ { "scopeId", "lastReadMessageId"?, "unreadCount", "groupId"? } ] }`: one entry for every channel the user can currently read (§11.3) in groups they belong to, and every DM conversation in their inbox. `lastReadMessageId` is absent if nothing has been read; `groupId` is present for channel scopes. `unreadCount` counts messages in the scope **newer than the marker** and **not authored by the user**.
+* `PATCH /api/me/read-markers` — `{ "markers": [ { "scopeId", "lastReadMessageId" } ] }` (at least one). Markers only move **forward** in the scope's timeline order; a marker that would move backward is ignored, as is one naming a message the provider does not hold in that scope, or an unknown scope. **`200 OK`** returns `{ "scopes": [ … ] }` containing only the scopes that actually advanced, with their new `unreadCount`.
+* When markers advance, the provider emits `read.updated` with `{ "markers": [ … ] }` (the same entries as the PATCH response) to all of the user's connections, so their other devices clear the same unread badges.
+
+Both endpoints are signed local-account endpoints (remote actors receive `403`). Providers **MAY** include extra fields (§2.3).
+
 ---
 
 ## 8. Federation Rules
@@ -1837,6 +1881,16 @@ Authentication proves the calling provider domain; authorization is still requir
 
 * Providers **MUST** apply allow/deny policy for which remote providers may federate.
 * Providers **MUST** enforce channel/group tiers when serving federation traffic.
+
+#### Outbound requests (Normative)
+
+Almost every host a provider contacts is chosen by someone else: the domain in a request's `X-OFSCP-Actor` or `X-OFSCP-Provider` header (key lookups §4.6, discovery §8.1), entries in a peer's known-providers list (§8.6), a user's notification `target` (§10), or a browser's push endpoint. A provider that fetches such hosts blindly can be steered at its own loopback interface, the cloud metadata service, or an internal network (server-side request forgery). For **every** outbound request to a host it did not configure itself, a provider:
+
+* **MUST** use `https:` only.
+* **MUST** refuse the request unless the target — a literal IP, or **every** address its name resolves to — is a publicly routable unicast address. At minimum this excludes loopback (`127.0.0.0/8`, `::1`), unspecified (`0.0.0.0/8`, `::`), private (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`), link-local (`169.254.0.0/16`, `fe80::/10`), shared address space (`100.64.0.0/10`), documentation and benchmarking ranges, multicast, and reserved ranges, including the same ranges written as IPv4-mapped or NAT64 IPv6 addresses. An operator **MAY** explicitly allow specific internal peers (e.g. for development).
+* **MUST NOT** follow redirects; a `3xx` response is treated as a failed request.
+* **SHOULD** bound each request with a timeout (RECOMMENDED ≤10 seconds) and cap the response size it will read.
+* **SHOULD** rate-limit lookups triggered by inbound requests (e.g. the key re-fetch-on-failure of §4.6), so that a stream of requests naming random key ids cannot be used to make it hammer a third-party provider.
 
 ### 8.1. Provider Signing Identity
 
@@ -1864,7 +1918,7 @@ Recipients **MAY** cache discovery per its HTTP caching headers, but **MUST** re
 Remote users join exactly as local users do: by sending a user-signed (§4.4) request **directly to the group's home provider**. There is no provider-to-provider join relay. The group's provider verifies the signature by resolving the actor's keys from the actor's home provider (§4.6).
 
 * `POST /api/groups/{groupId}/join` (§5.7) is the canonical join.
-* `POST /api/groups/{groupId}/channels/{channelId}/join` is a convenience alias for clients that start from a channel link. OFSCP v0.1 has **no per-channel membership**: this endpoint joins the channel's **parent group** under the group's `joinPolicy` and tier, and responds exactly as §5.7 `join` does (`201` + `Member` for `open`; `202` + `JoinRequest` for `request`; `403` for `invite`). If the caller is already a member it returns **`200`** with the existing `Member`. Access to the specific channel then follows §11.3.
+* `POST /api/groups/{groupId}/channels/{channelId}/join` is a convenience alias for clients that start from a channel link. OFSCP v0.1 has **no per-channel membership**: this endpoint joins the channel's **parent group** under the group's `joinPolicy` and tier, and responds exactly as §5.7 `join` does (`201` + `Member` for `open`; `202` + `JoinRequest` for `request`; `403` for `invite` or a `private`-tier group). If the caller is already a member it returns **`200`** with the existing `Member`. Access to the specific channel then follows §11.3.
 
 ### 8.3. Direct messages
 
@@ -2029,6 +2083,71 @@ Delivery requests **MUST** be **provider-signed** (§8.1): the originating provi
 * `GET /api/notifications/endpoints` — lists the caller's endpoints: `{ "endpoints": [ { "id", "type", "target", "events" } ] }`.
 * `DELETE /api/notifications/endpoints/{id}` — removes one. **`204 No Content`**; **`404`** if the caller has no such endpoint.
 
+### 10.1. Notification feed & mentions (OPTIONAL)
+
+A provider **MAY** keep a per-user **notification feed**: a list of channel events that concern the user. The feed is **provider-local** — a provider creates entries only for its own users, from messages in channels it hosts. (Notifying a user about activity on another provider is future work, §13.) Providers that offer it advertise nothing extra; clients discover it by calling the endpoint (`404` if not offered).
+
+**Mentions.** A mention is `@handle` or `@handle@domain` in a message's `content.text`, matched case-insensitively and lowercased, where:
+
+* the `@` is not preceded by a letter, digit, `_`, or `@` (so `bob@example.com` in prose is not a mention);
+* `handle` is the longest following run of handle characters (`[a-z0-9_-]`, §2.2.1);
+* `@domain` is optional; a bare `@handle` names a user **of the provider hosting the channel**.
+
+**When entries are created.** When a message is **created** in a channel (not when it is edited, and never for DMs), the channel's provider creates an entry for each local user `u` who:
+
+1. is not the message's author, **and**
+2. can read the channel (effective read access, §11.3) at that moment — a mention never discloses a message to someone who could not otherwise see it, **and**
+3. qualifies for one of these types (highest-precedence type wins; **at most one entry per user per message**):
+   * `mention` — `u` is mentioned;
+   * `reply` — the message is a reply (§7.2) to a message `u` authored;
+   * `message` — `u` has set the channel to `all` (§10.2);
+4. and has not set the channel to `none` (§10.2).
+
+A notification object:
+
+```json
+{ "id": "ntf_1", "type": "mention", "sourceMessageId": "msg_999", "channelId": "chn_general", "groupId": "grp_1", "author": "alice@a.com", "createdAt": "2026-02-01T10:00:00Z", "seenAt": "2026-02-01T10:01:00Z" }
+```
+
+`seenAt` (the entry has been shown in the user's list) and `readAt` (the user acted on it; implies seen) are absent until set. When an entry is created the provider emits `notification.created` with `{ "notification": … }` to the user's connections (no subscription needed, as for DMs, §7.4).
+
+**Endpoints** (signed; local-account endpoints, so remote actors receive `403`):
+
+* `GET /api/me/notifications?type=&limit=&cursor=` — the caller's entries, **newest first**. `type` filters to one type (any other value is ignored). `limit` defaults to **30**, maximum **100**. Response: `{ "items": [ Notification ], "counts": { "mention", "reply", "message" }, "nextCursor"? }` — note `nextCursor` is top-level, not inside `page` (an exception to §7.2). `counts` are the numbers of entries **not yet seen**, per type. Listing does not mark anything seen.
+* `POST /api/me/notifications/seen` and `POST /api/me/notifications/read` — body `{ "ids"?: [ … ] }`; omitted or empty `ids` means all of the caller's entries, and ids that are not the caller's are ignored. `read` also sets `seenAt`. Both are idempotent. Response: `{ "affected": <rows changed>, "counts": { … } }`.
+
+### 10.2. Notification settings (OPTIONAL)
+
+A user **MAY** choose, per group or per channel, how much of it notifies them. A setting is `{ "scopeType": "group" | "channel", "scopeId": "<local id>", "mode": "all" | "mentions" | "none" }`:
+
+* `all` — every new message creates a `message` entry (in addition to mentions and replies);
+* `mentions` — only mentions and replies (the **default**);
+* `none` — nothing, including mentions and replies.
+
+The effective mode for a channel is the channel's setting if present, else its group's, else `mentions`. Settings govern the feed (§10.1) and therefore push (§10.3) for channel activity; they do not affect DMs.
+
+Endpoints (signed; local-account): `GET /api/me/notification-settings` → `{ "prefs": [ Setting ] }`; `PUT /api/me/notification-settings` with a `Setting` (an upsert) → `200` with the stored setting; `DELETE /api/me/notification-settings?scopeType=&scopeId=` → `200` `{ "cleared": true | false }`. An invalid `scopeType`, `mode` or `scopeId` is a `400`; providers are not required to check that the group or channel exists.
+
+### 10.3. Web Push (OPTIONAL)
+
+A provider **MAY** deliver notifications to a user's offline devices with standard Web Push: the Push API protocol (RFC 8030), message encryption with `aes128gcm` (RFC 8291), and VAPID application-server identification (RFC 8292).
+
+* `GET /api/push/public-key` (signature optional) → `{ "publicKey": "<base64url uncompressed P-256 point>" }`, the provider's VAPID key, which a browser passes as `applicationServerKey` when subscribing. It is stable across restarts.
+* `POST /api/push/subscribe` (signed; local-account) — the browser `PushSubscription`'s `{ "endpoint", "keys": { "p256dh", "auth" } }`; `endpoint` **MUST** be `https:`. **`201 Created`** → `{ "id" }`. Subscriptions are keyed by `endpoint`; re-subscribing an existing endpoint updates its keys and binds it to the caller.
+* `POST /api/push/unsubscribe` (signed; local-account) — `{ "endpoint" }`; removes the caller's subscription. **`204 No Content`** whether or not it existed.
+
+The provider pushes to **all** of a user's subscriptions when a notification-feed entry (§10.1) is created for them, or a DM (§7.4) arrives in their inbox, **and the user has no live WebSocket connection** to that provider. The encrypted payload is JSON:
+
+```json
+{ "title": "New mention from alice", "body": "@bob can you look at…", "tag": "chan:grp_1", "data": { "type": "mention", "groupId": "grp_1", "channelId": "chn_general", "messageId": "msg_999" } }
+```
+
+* `body` is a preview of the message text, at most 120 characters.
+* `data.type` is the notification type (`mention`, `reply`, `message`) or `dm`; `data` carries `groupId`, `channelId` and `messageId` for channel activity, or `dmId` and `messageId` for a DM, so any client can route the user to the right place. Providers **MAY** add fields (e.g. a `targetUrl` for their own web client).
+* `tag` groups notifications for collapsing (`chan:<groupId>` or `dm:<dmId>`).
+
+When the push service answers `404` or `410`, the provider **MUST** delete that subscription.
+
 ---
 
 ## 11. Tiers (Access & Discoverability)
@@ -2041,7 +2160,7 @@ The canonical tiers (normative):
 
 | Tier | Who may read | Who may join | Discovery |
 | --- | --- | --- | --- |
-| `private` | Members only | Per the group's `joinPolicy` (§5.2) | Never listed or recommended |
+| `private` | Members only | **Invite only** (§5.6), whatever the group's `joinPolicy` | Never listed or recommended |
 | `group` | Members only | Per the group's `joinPolicy` (§5.2) | Never listed or recommended |
 | `public` | Anyone, including unauthenticated and non-member callers | Per `joinPolicy` | Not recommended, but readable by anyone with the link |
 | `discoverable` | As `public` | Per `joinPolicy` | **MAY** be surfaced by recommendations (§11.2); always consumed live from the source |
@@ -2049,6 +2168,8 @@ The canonical tiers (normative):
 Rules:
 
 * **Tiers do not limit federation.** In every tier, "member" includes remote actors (§2.2) who have joined; a remote member has exactly the access a local member with the same role has.
+* **`private` groups are invite-only.** A provider **MUST** reject `POST /api/groups/{groupId}/join` (and the channel-join alias of §8.2) on a `private`-tier group with **`403`**, whatever its stored `joinPolicy`; membership can only come from redeeming an invite (§5.6). This is what distinguishes `private` from `group`.
+* **Unknown tiers fail closed.** A provider-defined tier that a client or provider does not recognise **MUST** be treated as `group` for access decisions (members only).
 * **Reading never implies posting.** A non-member who can read a `public`/`discoverable` channel (including over a live subscription, §7.1) **MUST NOT** be allowed to post, react, or type in it; those require membership plus the relevant permission (§5.2, §5.2.1).
 
 ### 11.1. Tier Discovery
@@ -2117,12 +2238,13 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Support password-based registration and login
 - [ ] Issue scoped, short-lived bootstrap tokens on registration/login (§4.2)
 - [ ] Implement device key registration (bootstrap-authenticated), listing, and revocation, closing revoked keys' WebSocket connections with `4003` (§4.7)
-- [ ] Validate Ed25519 request signatures over the §4.4.2 canonical string, including authority binding and nonce replay rejection, with one provider-wide replay store (§4.5)
+- [ ] Validate Ed25519 request signatures over the §4.4.2 canonical string, including authority binding and nonce replay rejection, with one bounded provider-wide replay store that records a nonce only after the signature verifies (§4.5)
+- [ ] Apply the outbound-request rules (https only, public addresses only, no redirects) to every request to a host named by someone else (§8)
 - [ ] Allow cross-origin access per §3.4 (CORS preflight and headers; no `Origin` check on WebSocket upgrades)
 - [ ] Authenticate WebSocket connections via the signed `auth.challenge`/`authenticate` handshake (§7.1)
 - [ ] Serve user public keys via the `/.well-known/ofscp/users/{handle}/keys` endpoint
 - [ ] Support group and channel management (create/read/update/delete) with the permission model (§5.5)
-- [ ] Support group membership: join/leave, member listing, roles, and the `request` approval flow (§5.7)
+- [ ] Support group membership: join/leave, member listing, roles, per-group nicknames, `member.updated`, and the `request` approval flow (§5.7)
 - [ ] Support message edit (author-only, `editUntil`) and tombstone delete (§7.1)
 - [ ] Support direct messages: deterministic `dmId` derivation, inbox-only storage (no sender copy), the `{dmId}`/`to` verification on delivery, conversation pointers and `dm.conversation`, conversation listing/reading, and `dm.message` real-time delivery (§7.4)
 - [ ] Support the explicit contacts model (request/accept/remove, local and federated) backing the `contacts` visibility tier (§6.7)
@@ -2141,12 +2263,16 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 
 - [ ] Maintain and share a known-providers list at `GET /api/providers`, and advertise `capabilities.discovery.sharesKnownProviders` (§8.6)
 - [ ] Compile a discovery feed at `GET /api/discover` from discoverable channels (local + known providers) as pointers, and advertise `capabilities.discovery.discoverFeed` (§11.2)
+- [ ] Offer guest upgrade via `/api/me/claim` and `/api/me/merge` (§4.8.1)
+- [ ] Offer a notification feed with mentions, per-scope notification settings, and Web Push (§10.1–§10.3)
+- [ ] Embed DM reactions inline in DM history (§7.4)
+- [ ] Keep read markers and unread counts by message id (§7.7)
 
 ### Client **MUST**
 
 - [ ] Support Ed25519 request signing over the §4.4.2 canonical string (fresh per-request nonce, body digest) for all authenticated requests
 - [ ] Complete the WebSocket signed-challenge handshake before sending other commands (§7.1)
-- [ ] Derive `dmId` per §7.4, name the recipient in `to`, record conversation pointers at the home provider after cross-provider sends, and read sent history from the counterparty's provider (no sender copy is stored server-side)
+- [ ] Derive `dmId` per §7.4 (no sender copy is stored server-side)
 - [ ] For remote channels, open the real-time WebSocket to the channel's home provider (not the user's own) and complete the §7.1 handshake there (§8.5)
 - [ ] Compose the home feed client-side by reading each followed channel live from its source (§7.6); do not rely on a server-compiled feed
 - [ ] Support all message types or graceful fallback
@@ -2156,6 +2282,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Render metadata extensions when schemas known
 - [ ] Provide UX for tiers (access + discoverability)
 - [ ] Handle federation latency + retries
+- [ ] Name the DM recipient in `to`, record a conversation pointer at the home provider after a cross-provider send, and read sent history from the counterparty's provider (§7.4)
 
 ---
 
@@ -2208,6 +2335,8 @@ Client                Remote Provider              Home Provider
 * Group (multi-party) direct messages; v0.1 DMs are two-party only (§7.4)
 * Richer, standardized cross-provider discovery/search & ranking; v0.1 provides only optional known-provider lists (§8.6) and provider-compiled discovery feeds (§11.2)
 * Rich moderation APIs (ban lists, reporting)
+* Cross-provider notifications: mentions of, and replies to, users on other providers (v0.1 feeds are provider-local, §10.1)
+* Cross-provider read state: read markers for channels on other providers (v0.1 markers are provider-local, §7.7)
 * Media relay + SFU guidelines for large calls
 * Schema registry governance
 * Interop test suite & conformance badges

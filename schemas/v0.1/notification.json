@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/notification.json",
+  "title": "OFSCP Notification feed entry (v0.1)",
+  "description": "One entry of a user's provider-local notification feed (§10.1).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "id",
+    "type",
+    "sourceMessageId",
+    "channelId",
+    "groupId",
+    "author",
+    "createdAt"
+  ],
+  "properties": {
+    "id": {
+      "$ref": "./defs/common.json#/$defs/LocalId"
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "`mention`, `reply` or `message`; unknown values MUST be tolerated (§2.3)."
+    },
+    "sourceMessageId": {
+      "$ref": "./defs/common.json#/$defs/LocalId"
+    },
+    "channelId": {
+      "$ref": "./defs/common.json#/$defs/LocalId"
+    },
+    "groupId": {
+      "$ref": "./defs/common.json#/$defs/LocalId"
+    },
+    "author": {
+      "$ref": "./defs/identity.json#/$defs/UserRef"
+    },
+    "createdAt": {
+      "$ref": "./defs/common.json#/$defs/Rfc3339DateTime"
+    },
+    "seenAt": {
+      "$ref": "./defs/common.json#/$defs/Rfc3339DateTime"
+    },
+    "readAt": {
+      "$ref": "./defs/common.json#/$defs/Rfc3339DateTime"
+    }
+  }
+}

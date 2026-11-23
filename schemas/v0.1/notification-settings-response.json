@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/notification-settings-response.json",
+  "title": "OFSCP GET /api/me/notification-settings response (v0.1)",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "prefs"
+  ],
+  "properties": {
+    "prefs": {
+      "type": "array",
+      "items": {
+        "$ref": "./notification-setting.json"
+      }
+    }
+  }
+}
