@@ -122,7 +122,8 @@ Content-Type: application/json
     "contact": "mailto:admin@social.example",
     "authentication": {
       "login_endpoint": "https://social.example/api/auth/login",
-      "registration_endpoint": "https://social.example/api/auth/register"
+      "registration_endpoint": "https://social.example/api/auth/register",
+      "registration": "open"
     },
     "publicKeys": [
       {
@@ -221,6 +222,32 @@ Response (`201 Created`):
 ```json
 { "bootstrap_token": "bt_…", "token_type": "bootstrap", "expires_in": 300 }
 ```
+
+**Registration modes.** A provider decides who may create accounts, and advertises it in discovery as `provider.authentication.registration` (§3.1):
+
+* `"open"` — anyone may register. This is the meaning when the field is absent.
+* `"invite"` — registration requires a provider-issued **account invite** (below).
+* `"closed"` — no self-registration (accounts are created by the provider's own means, e.g. an operator). A closed provider **SHOULD** omit `registration_endpoint`.
+
+Clients **SHOULD** read this before offering a sign-up form, and **MUST** still handle the errors below, since a provider's mode can change.
+
+**Account invites.** For an `"invite"` provider, the registration request carries an `inviteToken`:
+
+```json
+{ "handle": "carol", "password": "…", "inviteToken": "ai_…" }
+```
+
+* An account invite is an opaque, high-entropy (≥128 bits), single-use, time-limited token minted by the provider (how it is minted — admin tools, operator CLI — is outside this specification). It **MAY** pin a handle, in which case the request's `handle` **MUST** equal it. It is consumed atomically with the account's creation. Account invites are distinct from the group invites of §5.6.
+* A provider **SHOULD** share an account invite as a link of the form `https://{authority}/register?invite={token}`, where `{authority}` is its canonical authority (§2.2). A client handed such a link learns both the provider to register with and the token; the provider **MAY** also serve a web sign-up page at that URL.
+* An `"open"` provider **MAY** accept or ignore an `inviteToken`.
+
+**Registration errors** (codes from §7.3):
+
+* `"closed"` provider → **`403`** `registration_closed`, whether or not an `inviteToken` is sent.
+* `"invite"` provider with an `inviteToken` that is missing, unknown, expired, already used, or pinned to a different handle → **`403`** `invite_required`. Providers **MUST** use this one code for all of these cases, so that responses do not reveal which tokens exist.
+* Handle already taken → **`409`** `conflict`. Invalid handle (§2.2.1) or password (§4.1.4) → **`400`** `bad_request`.
+
+Registration remains subject to the rate limits of §4.1.5.
 
 #### 4.1.2. Login
 
@@ -1603,6 +1630,8 @@ Example:
 | 403 | `forbidden` | Authenticated, but not permitted (including federation policy, §8) |
 | 404 | `not_found` | No such resource, or not visible to the caller |
 | 409 | `conflict` | The request conflicts with current state (e.g. a single-use invite already used) |
+| 403 | `registration_closed` | This provider does not accept self-registration (§4.1.1) |
+| 403 | `invite_required` | Registration needs a valid account invite, and none was supplied or the one supplied is not usable (§4.1.1) |
 | 409 | `subscription_limit` | Too many live subscriptions on one WebSocket connection (§7.1); waiting does not help — unsubscribe from something first |
 | 413 | `payload_too_large` | The request or upload exceeds the provider's size limit |
 | 429 | `too_many_requests` | Rate limited; honour `Retry-After` when present |
