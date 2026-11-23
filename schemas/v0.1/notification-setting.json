@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/notification-setting.json",
+  "title": "OFSCP notification setting (v0.1)",
+  "description": "Body of PUT /api/me/notification-settings and one entry of its GET (§10.2).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "scopeType",
+    "scopeId",
+    "mode"
+  ],
+  "properties": {
+    "scopeType": {
+      "type": "string",
+      "enum": [
+        "group",
+        "channel"
+      ]
+    },
+    "scopeId": {
+      "$ref": "./defs/common.json#/$defs/LocalId"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "all",
+        "mentions",
+        "none"
+      ]
+    }
+  }
+}

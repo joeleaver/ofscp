@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/push-subscribe-request.json",
+  "title": "OFSCP POST /api/push/subscribe request (v0.1)",
+  "description": "A browser PushSubscription's server-relevant fields (§10.3).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "endpoint",
+    "keys"
+  ],
+  "properties": {
+    "endpoint": {
+      "$ref": "./defs/common.json#/$defs/HttpsUri"
+    },
+    "keys": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "p256dh",
+        "auth"
+      ],
+      "properties": {
+        "p256dh": {
+          "type": "string",
+          "minLength": 1
+        },
+        "auth": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

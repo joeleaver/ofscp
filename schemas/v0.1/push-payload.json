@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/push-payload.json",
+  "title": "OFSCP Web Push payload (v0.1)",
+  "description": "The JSON plaintext of an encrypted Web Push message (§10.3).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "title",
+    "body",
+    "tag",
+    "data"
+  ],
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "body": {
+      "type": "string",
+      "description": "Preview of the message text, at most 120 characters (§10.3)."
+    },
+    "tag": {
+      "type": "string"
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "groupId": {
+          "$ref": "./defs/common.json#/$defs/LocalId"
+        },
+        "channelId": {
+          "$ref": "./defs/common.json#/$defs/LocalId"
+        },
+        "messageId": {
+          "$ref": "./defs/common.json#/$defs/LocalId"
+        },
+        "dmId": {
+          "$ref": "./defs/common.json#/$defs/DmId"
+        }
+      }
+    }
+  }
+}

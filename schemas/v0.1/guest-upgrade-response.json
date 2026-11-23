@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/guest-upgrade-response.json",
+  "title": "OFSCP POST /api/me/claim and /api/me/merge response (v0.1)",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "actor",
+    "keyId",
+    "profile"
+  ],
+  "properties": {
+    "actor": {
+      "$ref": "./defs/identity.json#/$defs/UserRef"
+    },
+    "keyId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profile": {
+      "$ref": "./defs/identity.json#/$defs/UserProfile"
+    }
+  }
+}
