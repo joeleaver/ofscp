@@ -1679,7 +1679,9 @@ Content-Type: application/json
 { "with": "bob@b.com", "lastMessage": { "id": "msg_77", "author": "alice@a.com", "type": "message", "content": { "mime": "text/plain", "text": "hey, are we still on for tomorrow?" }, "attachments": [], "createdAt": "2026-01-05T18:42:00Z", "metadata": [] } }
 ```
 
-* `with` is the counterparty actor; the provider **MUST** reject with **`400`** unless `{dmId}` equals the id derived from `{caller, with}`.
+* `with` is the counterparty actor, in canonical form: a lowercased `handle@domain` actor (§2.2, §2.2.1), never an object URI. The provider **MUST** reject with **`400`**, and record nothing, if `with` is not a canonical actor or if `{dmId}` does not equal the id derived from `{caller, with}`. (The `dmId` derivation lowercases its inputs, so a check on the derived id alone would accept `BOB@b.com` for `bob@b.com`.)
+* The provider **MUST** apply its federation allow/deny policy (§8 *Authorization*) to the counterparty's provider, rejecting with **`403`** if federation with it is not permitted. Otherwise a pointer becomes a way to make the provider send signed requests (e.g. for later reactions, edits or deletes) to a provider it has blocked.
+* Once a pointer exists, its counterparty is fixed by its `dmId`: an update **MUST NOT** change it.
 * `lastMessage` is OPTIONAL: the canonical message the recipient's provider returned for the send. If present it **MUST** be authored by the caller (`400` otherwise). It is a cached preview only — the authoritative copy stays in the counterparty's inbox, and providers **MUST NOT** serve it as history.
 * The provider creates or updates the pointer, sets its `updatedAt` to now, and emits `dm.conversation` with `{ "conversation": DmConversation }` to **all** of the caller's connections, so their other devices learn of conversations and messages sent elsewhere. **`200 OK`** returns the same `DmConversation`. It is a signed local-account endpoint (remote actors receive `403`) and idempotent.
 
@@ -1691,7 +1693,7 @@ Because each DM lives only in its recipient's inbox, a participant's received me
 
 #### Listing & reading
 
-* `GET /api/me/dms` — paginated list of the authenticated user's DM conversations (`DmConversation` summaries: `id`, `participants`, optional `lastMessage`, `updatedAt`), newest activity first, using the opaque-cursor paging of §7.2. It includes every conversation with a message in the user's inbox **and** every conversation pointer; `lastMessage` is the newer of the last received message and the pointer's cached sent message.
+* `GET /api/me/dms` — paginated list of the authenticated user's DM conversations (`DmConversation` summaries: `id`, `participants`, optional `lastMessage`, `updatedAt`), newest activity first, using the opaque-cursor paging of §7.2. It includes every conversation with a message in the user's inbox **and** every conversation pointer; `lastMessage` is the newer of the last received message and the pointer's cached sent message. "Newer" **MUST** be decided by times the provider itself recorded (when it stored the received message, and when it last updated the pointer), never by a client-supplied `createdAt` in the cached preview, which the client can set to anything.
 * `GET /api/dms/{dmId}/messages?cursor=…&direction=…&limit=…` — paginated message history for the conversation: the authenticated participant's full view the queried provider can serve (messages they received, plus messages they sent that reside in the counterparty's inbox held on this provider — see *Source of truth & sender copies*), with the same cursor space and response shape as §7.2. Providers **MUST** restrict access to the conversation's participants (**`403`** otherwise) and return **`404`** for an unknown `dmId`.
 
 #### Real-time
@@ -1856,6 +1858,8 @@ A marker names a **message**, never a cursor: clients **MUST NOT** decode cursor
 * `GET /api/me/read-markers` — `{ "scopes": [ { "scopeId", "lastReadMessageId"?, "unreadCount", "groupId"? } ] }`: one entry for every channel the user can currently read (§11.3) in groups they belong to, and every DM conversation in their inbox. `lastReadMessageId` is absent if nothing has been read; `groupId` is present for channel scopes. `unreadCount` counts messages in the scope **newer than the marker** and **not authored by the user**.
 * `PATCH /api/me/read-markers` — `{ "markers": [ { "scopeId", "lastReadMessageId" } ] }` (at least one). Markers only move **forward** in the scope's timeline order; a marker that would move backward is ignored, as is one naming a message the provider does not hold in that scope, or an unknown scope. **`200 OK`** returns `{ "scopes": [ … ] }` containing only the scopes that actually advanced, with their new `unreadCount`.
 * When markers advance, the provider emits `read.updated` with `{ "markers": [ … ] }` (the same entries as the PATCH response) to all of the user's connections, so their other devices clear the same unread badges.
+
+**A scope the user cannot read is an unknown scope.** A provider **MUST** accept a marker only for a channel the user can currently read (effective read access, §11.3) or a DM conversation in the user's own inbox. Any other marker **MUST** be handled exactly like one for an unknown scope: the request still succeeds with `200`, the marker is neither stored nor reported, and no `read.updated` is emitted. A provider **MUST NOT** answer such a marker with `403` or `404`, or report an `unreadCount` for it, since either would let an outsider (such as a removed member) confirm that a channel or message exists and watch its activity.
 
 Both endpoints are signed local-account endpoints (remote actors receive `403`). Providers **MAY** include extra fields (§2.3).
 
