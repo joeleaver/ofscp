@@ -157,6 +157,7 @@ async function main() {
     ['tests/user-keys-response.sample.json', 'schemas/v0.1/user-keys-response.json'],
     ['tests/device-keys-response.sample.json', 'schemas/v0.1/device-keys-response.json'],
     ['tests/notifications-endpoints-response.sample.json', 'schemas/v0.1/notifications-endpoints-response.json'],
+    ['tests/guest-claim-request.sample.json', 'schemas/v0.1/guest-claim-request.json'],
     ['tests/notification.sample.json', 'schemas/v0.1/notification.json'],
     ['tests/notifications-response.sample.json', 'schemas/v0.1/notifications-response.json'],
     ['tests/notifications-mark-response.sample.json', 'schemas/v0.1/notifications-mark-response.json'],
