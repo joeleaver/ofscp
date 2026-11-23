@@ -1,5 +1,5 @@
 {
-  "type": "https://ofscp.example/errors/invalid-payload",
+  "type": "https://providera.com/problems/bad_request",
   "title": "Invalid payload",
   "status": 400,
   "errorCode": "bad_request",
