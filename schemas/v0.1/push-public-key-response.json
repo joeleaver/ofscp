@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/push-public-key-response.json",
+  "title": "OFSCP GET /api/push/public-key response (v0.1)",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "publicKey"
+  ],
+  "properties": {
+    "publicKey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "description": "VAPID public key: uncompressed P-256 point, unpadded base64url (§10.3)."
+    }
+  }
+}

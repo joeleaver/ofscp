@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/notifications-response.json",
+  "title": "OFSCP GET /api/me/notifications response (v0.1)",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "items",
+    "counts"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "./notification.json"
+      }
+    },
+    "counts": {
+      "$ref": "#/$defs/NotificationCounts"
+    },
+    "nextCursor": {
+      "$ref": "./defs/common.json#/$defs/OpaqueCursor"
+    }
+  },
+  "$defs": {
+    "NotificationCounts": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "mention",
+        "reply"
+      ],
+      "properties": {
+        "mention": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reply": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "message": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "description": "Unseen entries per type (§10.1). `message` MAY be omitted (read as 0)."
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/notifications-mark-response.json",
+  "title": "OFSCP POST /api/me/notifications/{seen,read} response (v0.1)",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "affected",
+    "counts"
+  ],
+  "properties": {
+    "affected": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "counts": {
+      "$ref": "./notifications-response.json#/$defs/NotificationCounts"
+    }
+  }
+}
