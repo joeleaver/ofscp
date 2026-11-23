@@ -1,0 +1,11 @@
+{
+  "title": "New mention from alice",
+  "body": "@bob can you look at the release notes before Friday?",
+  "tag": "chan:grp_1",
+  "data": {
+    "type": "mention",
+    "groupId": "grp_1",
+    "channelId": "chn_general",
+    "messageId": "msg_999"
+  }
+}

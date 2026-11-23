@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/ws/notification-created.json",
+  "title": "OFSCP WS notification.created event (v0.1)",
+  "description": "A new entry in the recipient's notification feed (§10.1).",
+  "allOf": [
+    {
+      "$ref": "./envelope.json"
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "data"
+      ],
+      "properties": {
+        "type": {
+          "const": "notification.created"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "notification"
+          ],
+          "properties": {
+            "notification": {
+              "$ref": "../notification.json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
