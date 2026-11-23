@@ -5,18 +5,11 @@
   "type": "object",
   "$defs": {
     "UserRef": {
-      "description": "User reference. The canonical actor form is `handle@domain` (no leading '@'). For interoperability an HTTPS URI MAY also be used; clients MUST treat the value as opaque.",
-      "oneOf": [
-        {
-          "$ref": "./common.json#/$defs/HttpsUri"
-        },
-        {
-          "type": "string",
-          "pattern": "^[^@\\s]+@[^@\\s]+$",
-          "examples": [
-            "jane@a.com"
-          ]
-        }
+      "description": "Actor (§2.2): `handle@domain`, where domain is the lowercased home-provider authority (with :port only if non-default). Every user-valued field uses this form.",
+      "type": "string",
+      "pattern": "^[a-z0-9_-]{3,32}@[a-z0-9.-]+(:[0-9]{1,5})?$",
+      "examples": [
+        "jane@a.com"
       ]
     },
     "UserProfile": {
@@ -34,8 +27,7 @@
           "$ref": "./common.json#/$defs/HttpsUri"
         },
         "handle": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "./common.json#/$defs/Handle"
         },
         "domain": {
           "type": "string",

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/notifications-endpoints-response.json",
+  "title": "OFSCP GET /api/notifications/endpoints response (v0.1)",
+  "description": "The caller's registered notification endpoints (§10). Each item is a registration plus its provider-assigned id; POST /api/notifications/endpoints returns one such item.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["endpoints"],
+  "properties": {
+    "endpoints": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/NotificationEndpoint" }
+    }
+  },
+  "$defs": {
+    "NotificationEndpoint": {
+      "allOf": [
+        { "$ref": "./notifications-webhook-registration.json" },
+        {
+          "type": "object",
+          "required": ["id"],
+          "properties": { "id": { "$ref": "./defs/common.json#/$defs/LocalId" } }
+        }
+      ]
+    }
+  }
+}
