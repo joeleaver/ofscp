@@ -444,7 +444,11 @@ Response:
 }
 ```
 
-Providers **MUST** omit revoked keys. Verifiers **MAY** cache until `cache_until`, but on a verification failure for a `key_id` they believe should be valid, they **MUST** re-fetch before finally rejecting, so that newly-rotated keys are picked up promptly.
+Providers **MUST** omit revoked keys.
+
+**Unknown, disabled or keyless handles.** For a syntactically valid handle (§2.2.1), the provider **MUST** answer `200` with `"keys": []` whether the handle is unknown, belongs to a disabled or deleted account, or simply has no active keys. The status code and body shape **MUST NOT** reveal which, so the endpoint can't be used to enumerate accounts (compare §4.1.2 login and `POST /api/auth/recover`). `actor` is the canonical actor (§2.2) formed from the requested handle. A handle that is not syntactically valid names no possible account, so a provider **MAY** answer `404` `not_found` for it (or the same empty `200`). Verifiers **MUST** treat `404` and an empty `keys` list the same way: no key matches, and the request fails verification with `401` (§4.5).
+
+Verifiers **MAY** cache until `cache_until`, but on a verification failure for a `key_id` they believe should be valid, they **MUST** re-fetch before finally rejecting, so that newly-rotated keys are picked up promptly.
 
 ### 4.7. Key Management
 
