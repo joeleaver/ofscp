@@ -26,7 +26,7 @@
       "additionalProperties": true,
       "required": ["id", "mime", "url", "size"],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
+        "id": { "$ref": "./common.json#/$defs/LocalId" },
         "mime": { "$ref": "./common.json#/$defs/MimeType" },
         "url": { "$ref": "./common.json#/$defs/HttpsUri" },
         "size": { "type": "integer", "minimum": 0, "description": "Size in bytes." },

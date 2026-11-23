@@ -18,6 +18,11 @@
               "type": "array",
               "minItems": 0,
               "items": { "type": "string", "minLength": 1 }
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Present only on an unsolicited unsubscribed (§7.1 Losing access). `access_revoked` when the actor lost read access; other values MAY be added and MUST be tolerated."
             }
           }
         }

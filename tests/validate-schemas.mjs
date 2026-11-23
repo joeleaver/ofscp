@@ -124,6 +124,7 @@ async function main() {
     ['tests/ws-unsubscribe.sample.json', 'schemas/v0.1/ws/unsubscribe.json'],
     ['tests/ws-subscribed.sample.json', 'schemas/v0.1/ws/subscribed.json'],
     ['tests/ws-unsubscribed.sample.json', 'schemas/v0.1/ws/unsubscribed.json'],
+    ['tests/ws-unsubscribed-revoked.sample.json', 'schemas/v0.1/ws/unsubscribed.json'],
     ['tests/ws-message-create.sample.json', 'schemas/v0.1/ws/message-create.json'],
     ['tests/ws-message-update.sample.json', 'schemas/v0.1/ws/message-update.json'],
     ['tests/ws-message-delete.sample.json', 'schemas/v0.1/ws/message-delete.json'],
@@ -153,12 +154,14 @@ async function main() {
     ['tests/auth-bootstrap-response.sample.json', 'schemas/v0.1/auth-bootstrap-response.json'],
     ['tests/device-key-registration.sample.json', 'schemas/v0.1/device-key-registration.json'],
     ['tests/device-key-response.sample.json', 'schemas/v0.1/device-key-response.json'],
-    ['tests/user-keys-response.sample.json', 'schemas/v0.1/user-keys-response.json']
+    ['tests/user-keys-response.sample.json', 'schemas/v0.1/user-keys-response.json'],
+    ['tests/device-keys-response.sample.json', 'schemas/v0.1/device-keys-response.json'],
+    ['tests/notifications-endpoints-response.sample.json', 'schemas/v0.1/notifications-endpoints-response.json']
   ];
 
   for (const [samplePath, schemaPath] of cases) {
     const schema = await loadJson(schemaPath);
-    const validate = await ajv.compileAsync(schema);
+    const validate = ajv.getSchema(schema.$id) ?? (await ajv.compileAsync(schema));
     const sample = await loadJson(samplePath);
     const ok = validate(sample);
 
@@ -166,7 +169,7 @@ async function main() {
       console.error(`Validation failed: ${samplePath} against ${schemaPath}`);
       console.error(validate.errors);
       process.exitCode = 1;
-      return;
+      continue;
     }
 
     console.log(`OK: ${path.basename(samplePath)} validates against ${path.basename(schemaPath)}`);

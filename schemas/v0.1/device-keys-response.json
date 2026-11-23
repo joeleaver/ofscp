@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/device-keys-response.json",
+  "title": "OFSCP GET /api/auth/device-keys response (v0.1)",
+  "description": "The caller's active (non-revoked) device keys (§4.7). snake_case per §2.5.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["keys"],
+  "properties": {
+    "keys": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["key_id", "algorithm", "public_key", "device_name", "created_at"],
+        "properties": {
+          "key_id": { "type": "string", "minLength": 1 },
+          "algorithm": { "type": "string", "const": "Ed25519" },
+          "public_key": { "type": "string", "minLength": 1 },
+          "device_name": { "type": "string" },
+          "created_at": { "$ref": "./defs/common.json#/$defs/Rfc3339DateTime" }
+        }
+      }
+    }
+  }
+}

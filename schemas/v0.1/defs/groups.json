@@ -83,7 +83,7 @@
       "required": ["id", "name", "owner", "joinPolicy", "tier", "permissions", "createdAt", "updatedAt", "metadata"],
       "description": "Canonical group object. Channels are not embedded; fetch them via GET /api/groups/{groupId}/channels.",
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
+        "id": { "$ref": "./common.json#/$defs/LocalId" },
         "name": { "type": "string", "minLength": 1 },
         "description": { "type": "string" },
         "owner": { "$ref": "./identity.json#/$defs/UserRef" },
@@ -105,8 +105,8 @@
       "additionalProperties": true,
       "required": ["id", "groupId", "type", "tier", "createdAt", "updatedAt", "metadata"],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "groupId": { "type": "string", "minLength": 1 },
+        "id": { "$ref": "./common.json#/$defs/LocalId" },
+        "groupId": { "$ref": "./common.json#/$defs/LocalId" },
         "name": { "type": "string" },
         "type": { "$ref": "#/$defs/ChannelType" },
         "tier": { "$ref": "./common.json#/$defs/Tier" },
@@ -125,8 +125,8 @@
       "required": ["id", "groupId", "token", "uses", "createdBy", "createdAt"],
       "description": "A join link / invite token granting membership to a group (optionally a specific channel).",
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "groupId": { "type": "string", "minLength": 1 },
+        "id": { "$ref": "./common.json#/$defs/LocalId" },
+        "groupId": { "$ref": "./common.json#/$defs/LocalId" },
         "channelId": {
           "type": "string",
           "minLength": 1,
@@ -176,8 +176,8 @@
       "required": ["id", "groupId", "user", "state", "requestedAt"],
       "description": "A pending request to join a group whose joinPolicy is `request`.",
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "groupId": { "type": "string", "minLength": 1 },
+        "id": { "$ref": "./common.json#/$defs/LocalId" },
+        "groupId": { "$ref": "./common.json#/$defs/LocalId" },
         "user": { "$ref": "./identity.json#/$defs/UserRef" },
         "state": { "type": "string", "enum": ["pending", "approved", "denied"] },
         "message": { "type": "string", "description": "Optional note from the requester." },

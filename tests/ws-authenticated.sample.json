@@ -4,6 +4,6 @@
   "ts": "2026-01-01T12:00:01Z",
   "correlationId": "cli_a1",
   "data": {
-    "actor": "alice@providerA.com"
+    "actor": "alice@providera.com"
   }
 }

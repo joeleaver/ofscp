@@ -1,0 +1,10 @@
+{
+  "endpoints": [
+    {
+      "id": "nep_1",
+      "type": "webpush",
+      "target": "https://push.example/endpoint/abc",
+      "events": ["message.created", "call.started"]
+    }
+  ]
+}

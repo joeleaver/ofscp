@@ -25,6 +25,16 @@
       "minLength": 1,
       "description": "Opaque pagination cursor; treat as an uninterpreted string."
     },
+    "LocalId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,128}$",
+      "description": "A provider-assigned local id (§2.2): opaque, unique within the issuing provider, path-safe."
+    },
+    "Handle": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]{3,32}$",
+      "description": "A user handle (§2.2.1)."
+    },
     "DmId": {
       "type": "string",
       "pattern": "^dm_[0-9a-f]{64}$",

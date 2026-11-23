@@ -6,7 +6,7 @@
       "provider": "b.com",
       "sample": {
         "id": "msg_42",
-        "author": "ed@b.com",
+        "author": "eddie@b.com",
         "createdAt": "2026-02-03T14:00:00Z",
         "content": { "text": "Big news today!", "mime": "text/plain" }
       },

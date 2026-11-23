@@ -19,7 +19,7 @@
       "required": ["type", "id"],
       "properties": {
         "type": { "type": "string", "minLength": 1 },
-        "id": { "type": "string", "minLength": 1 }
+        "id": { "$ref": "./common.json#/$defs/LocalId" }
       }
     },
     "Permissions": {
@@ -34,7 +34,7 @@
       "additionalProperties": true,
       "required": ["id", "author", "type", "content", "attachments", "createdAt", "metadata"],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
+        "id": { "$ref": "./common.json#/$defs/LocalId" },
         "author": { "$ref": "./identity.json#/$defs/UserRef" },
         "type": { "type": "string", "enum": ["message", "memo", "article"] },
         "content": { "$ref": "#/$defs/Content" },
@@ -70,7 +70,7 @@
       "additionalProperties": true,
       "required": ["id", "author", "key", "reference", "createdAt", "metadata"],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
+        "id": { "$ref": "./common.json#/$defs/LocalId" },
         "author": { "$ref": "./identity.json#/$defs/UserRef" },
         "key": { "type": "string", "minLength": 1 },
         "unicode": { "type": "string" },
