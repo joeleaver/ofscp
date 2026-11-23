@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/read-markers-response.json",
+  "title": "OFSCP GET/PATCH /api/me/read-markers response (v0.1)",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "scopes"
+  ],
+  "properties": {
+    "scopes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ReadMarker"
+      }
+    }
+  },
+  "$defs": {
+    "ReadMarker": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "scopeId",
+        "unreadCount"
+      ],
+      "properties": {
+        "scopeId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A channel local id or a dmId (§7.7)."
+        },
+        "lastReadMessageId": {
+          "$ref": "./defs/common.json#/$defs/LocalId"
+        },
+        "unreadCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "groupId": {
+          "$ref": "./defs/common.json#/$defs/LocalId"
+        }
+      }
+    }
+  }
+}

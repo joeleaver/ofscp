@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/read-markers-update-request.json",
+  "title": "OFSCP PATCH /api/me/read-markers request (v0.1)",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "markers"
+  ],
+  "properties": {
+    "markers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "scopeId",
+          "lastReadMessageId"
+        ],
+        "properties": {
+          "scopeId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "lastReadMessageId": {
+            "$ref": "./defs/common.json#/$defs/LocalId"
+          }
+        }
+      }
+    }
+  }
+}

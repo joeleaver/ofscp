@@ -909,6 +909,7 @@ Requests to join a group. Behavior depends on the group's `joinPolicy` (§5.2):
 * `open` → the caller becomes a member immediately. **Response (`201 Created`):** the `Member`.
 * `request` → a pending request is recorded. **Response (`202 Accepted`):** the `JoinRequest`. An optional `{ "message": "…" }` body may accompany the request.
 * `invite` → **`403 Forbidden`**; the caller must redeem an invite (§5.6).
+* A `private`-tier group always behaves as `invite`, whatever its `joinPolicy` (§11).
 * Already a member → **`200 OK`** with the existing `Member` (idempotent).
 
 The caller may be local or remote (§8.2); a remote actor joins by signing this request directly to the group's provider.
@@ -1295,6 +1296,7 @@ The `type` field **MUST** be one of the following standardized strings.
 | `presence.subscribed` | Acknowledgement of a successful `presence.subscribe`. | `WsPresenceSubscribed` |
 | `presence.unsubscribed` | Acknowledgement of a successful `presence.unsubscribe`. | `WsPresenceUnsubscribed` |
 | `presence.update` | A subscribed user's presence changed (§7.5). | `WsPresenceUpdate` |
+| `read.updated` | The user's read markers advanced on another of their devices (§7.7). | `WsReadUpdated` |
 | `call.started` | A call became active in a subscribed channel. | `WsCallStarted` |
 | `call.ended` | A call ended in a subscribed channel. | `WsCallEnded` |
 | `call.participant` | A participant joined or left the call. | `WsCallParticipant` |
@@ -1789,6 +1791,18 @@ Because reads come straight from each source, a followed channel's edits, tombst
 
 Providers **MUST NOT** be required to compile or store a feed. A provider **MAY** offer an optional convenience endpoint that fans out these reads live on the client's behalf, but it **MUST NOT** store the result, and clients **MUST NOT** depend on it existing.
 
+### 7.7. Read markers & unread counts (OPTIONAL)
+
+A provider **MAY** keep, for each of its own users, a **read marker** per *scope* — a channel it hosts (by local id) or a DM conversation in the user's inbox (by `dmId`) — recording the newest message the user has read, and derive unread counts from it. Read markers are **provider-local** in v0.1: a user's markers for a remote channel are not kept anywhere (future work, §13).
+
+A marker names a **message**, never a cursor: clients **MUST NOT** decode cursors (§2.5), and every client already holds message ids.
+
+* `GET /api/me/read-markers` — `{ "scopes": [ { "scopeId", "lastReadMessageId"?, "unreadCount", "groupId"? } ] }`: one entry for every channel the user can currently read (§11.3) in groups they belong to, and every DM conversation in their inbox. `lastReadMessageId` is absent if nothing has been read; `groupId` is present for channel scopes. `unreadCount` counts messages in the scope **newer than the marker** and **not authored by the user**.
+* `PATCH /api/me/read-markers` — `{ "markers": [ { "scopeId", "lastReadMessageId" } ] }` (at least one). Markers only move **forward** in the scope's timeline order; a marker that would move backward is ignored, as is one naming a message the provider does not hold in that scope, or an unknown scope. **`200 OK`** returns `{ "scopes": [ … ] }` containing only the scopes that actually advanced, with their new `unreadCount`.
+* When markers advance, the provider emits `read.updated` with `{ "markers": [ … ] }` (the same entries as the PATCH response) to all of the user's connections, so their other devices clear the same unread badges.
+
+Both endpoints are signed local-account endpoints (remote actors receive `403`). Providers **MAY** include extra fields (§2.3).
+
 ---
 
 ## 8. Federation Rules
@@ -1838,7 +1852,7 @@ Recipients **MAY** cache discovery per its HTTP caching headers, but **MUST** re
 Remote users join exactly as local users do: by sending a user-signed (§4.4) request **directly to the group's home provider**. There is no provider-to-provider join relay. The group's provider verifies the signature by resolving the actor's keys from the actor's home provider (§4.6).
 
 * `POST /api/groups/{groupId}/join` (§5.7) is the canonical join.
-* `POST /api/groups/{groupId}/channels/{channelId}/join` is a convenience alias for clients that start from a channel link. OFSCP v0.1 has **no per-channel membership**: this endpoint joins the channel's **parent group** under the group's `joinPolicy` and tier, and responds exactly as §5.7 `join` does (`201` + `Member` for `open`; `202` + `JoinRequest` for `request`; `403` for `invite`). If the caller is already a member it returns **`200`** with the existing `Member`. Access to the specific channel then follows §11.3.
+* `POST /api/groups/{groupId}/channels/{channelId}/join` is a convenience alias for clients that start from a channel link. OFSCP v0.1 has **no per-channel membership**: this endpoint joins the channel's **parent group** under the group's `joinPolicy` and tier, and responds exactly as §5.7 `join` does (`201` + `Member` for `open`; `202` + `JoinRequest` for `request`; `403` for `invite` or a `private`-tier group). If the caller is already a member it returns **`200`** with the existing `Member`. Access to the specific channel then follows §11.3.
 
 ### 8.3. Direct messages
 
@@ -2015,7 +2029,7 @@ The canonical tiers (normative):
 
 | Tier | Who may read | Who may join | Discovery |
 | --- | --- | --- | --- |
-| `private` | Members only | Per the group's `joinPolicy` (§5.2) | Never listed or recommended |
+| `private` | Members only | **Invite only** (§5.6), whatever the group's `joinPolicy` | Never listed or recommended |
 | `group` | Members only | Per the group's `joinPolicy` (§5.2) | Never listed or recommended |
 | `public` | Anyone, including unauthenticated and non-member callers | Per `joinPolicy` | Not recommended, but readable by anyone with the link |
 | `discoverable` | As `public` | Per `joinPolicy` | **MAY** be surfaced by recommendations (§11.2); always consumed live from the source |
@@ -2023,6 +2037,8 @@ The canonical tiers (normative):
 Rules:
 
 * **Tiers do not limit federation.** In every tier, "member" includes remote actors (§2.2) who have joined; a remote member has exactly the access a local member with the same role has.
+* **`private` groups are invite-only.** A provider **MUST** reject `POST /api/groups/{groupId}/join` (and the channel-join alias of §8.2) on a `private`-tier group with **`403`**, whatever its stored `joinPolicy`; membership can only come from redeeming an invite (§5.6). This is what distinguishes `private` from `group`.
+* **Unknown tiers fail closed.** A provider-defined tier that a client or provider does not recognise **MUST** be treated as `group` for access decisions (members only).
 * **Reading never implies posting.** A non-member who can read a `public`/`discoverable` channel (including over a live subscription, §7.1) **MUST NOT** be allowed to post, react, or type in it; those require membership plus the relevant permission (§5.2, §5.2.1).
 
 ### 11.1. Tier Discovery
@@ -2115,6 +2131,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 
 - [ ] Maintain and share a known-providers list at `GET /api/providers`, and advertise `capabilities.discovery.sharesKnownProviders` (§8.6)
 - [ ] Compile a discovery feed at `GET /api/discover` from discoverable channels (local + known providers) as pointers, and advertise `capabilities.discovery.discoverFeed` (§11.2)
+- [ ] Keep read markers and unread counts by message id (§7.7)
 
 ### Client **MUST**
 
@@ -2182,6 +2199,7 @@ Client                Remote Provider              Home Provider
 * Group (multi-party) direct messages; v0.1 DMs are two-party only (§7.4)
 * Richer, standardized cross-provider discovery/search & ranking; v0.1 provides only optional known-provider lists (§8.6) and provider-compiled discovery feeds (§11.2)
 * Rich moderation APIs (ban lists, reporting)
+* Cross-provider read state: read markers for channels on other providers (v0.1 markers are provider-local, §7.7)
 * Media relay + SFU guidelines for large calls
 * Schema registry governance
 * Interop test suite & conformance badges
