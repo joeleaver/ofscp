@@ -94,7 +94,7 @@ Providers **SHOULD** define maximum payload sizes (request and response) and ret
 
 Providers **SHOULD** return errors using RFC 7807 Problem Details (`application/problem+json`) with stable `type` URIs.
 
-Providers **MAY** additionally include an `errorCode` field for machine-friendly, stable short codes.
+Every problem response **MUST** include an `errorCode`: a short snake_case code from the registry in §7.3. **`errorCode` (with `status`) is the interoperable key**: clients **MUST** decide how to handle an error from `status` and `errorCode`, and **MUST NOT** depend on the value of `type`, which each provider chooses (it is only required to be a stable URI). A client that receives an `errorCode` it does not recognise **MUST** fall back to handling by `status`.
 
 ---
 
@@ -387,6 +387,8 @@ Only after **all** checks pass is the request authenticated as the actor. Author
 **Replay store (Normative).** A provider **MUST** keep a **single** replay store covering every surface that accepts a signature: all signed REST routes, provider-signed federation requests (§8.1), and the WebSocket `authenticate` handshake (§7.1). Separate per-route or per-transport stores let a captured request be replayed against a different surface. Entries are keyed by **(signer kind, `key_id`, nonce)**, where the signer kind is *actor* (user-signed, §4.4) or *provider* (provider-signed, §8.1): the two `key_id` spaces are chosen independently and **MUST NOT** collide in the shared store.
 
 Step 4 only *checks* the store. A provider **MUST NOT** record a pair until step 7 has succeeded; it then re-checks and records the pair atomically (a concurrent copy of the request may have verified in the meantime). Recording earlier would let unauthenticated traffic fill the store, and let a forged request burn a nonce the genuine signer is about to use. The store **MUST** be bounded; when it is full the provider **MUST** fail closed — reject with **`503`** (and `Retry-After`) — rather than evict an unexpired entry, which would reopen that nonce to replay.
+
+**Restarts.** A replay store that does not survive a restart (e.g. an in-memory store) would forget nonces still inside the timestamp window. Such a provider **MUST** reject (`401`) any signature whose `X-OFSCP-Timestamp` is earlier than the moment the current store began accepting entries; a provider whose store persists across restarts needs no such rule. The same applies to the WebSocket `authenticate` handshake (§7.1).
 
 ### 4.6. Public Key Discovery
 
@@ -1533,7 +1535,7 @@ Either party **MAY** send a `ping`; the receiver **MUST** reply with `pong`, ech
 
 * **Ordering:** within a single channel, providers **MUST** deliver timeline events in an order consistent with their `cursor` values (monotonically non-decreasing). No ordering is guaranteed across different channels.
 * **Delivery:** delivery is **at-least-once**. Combined with resume (replay may re-send the boundary event) a client **MAY** see a duplicate, so clients **MUST** de-duplicate by message `id`. The `(author, channelId, clientMessageId)` idempotency rule above prevents duplicate *creation*.
-* **Limits:** providers **MAY** cap the number of subscriptions and the command rate per connection. On exceeding a limit a provider **SHOULD** reply with an `error` (e.g. `code: "rate_limited"` or `code: "subscription_limit"`) and **MAY** close the connection.
+* **Limits:** providers **MAY** cap the number of subscriptions and the command rate per connection. On exceeding a limit a provider **SHOULD** reply with an `error` (`code: "too_many_requests"` for the command rate, `code: "subscription_limit"` for the subscription cap; §7.3) and **MAY** close the connection.
 
 ### 7.2. Reading
 
@@ -1578,7 +1580,7 @@ It returns the same paginated shape as `…/messages` (`{ items: [ Message ], pa
 
 ### 7.3. Error semantics
 
-Providers **SHOULD** return errors using RFC 7807 Problem Details (`application/problem+json`) with stable `type` values.
+Providers **SHOULD** return errors using RFC 7807 Problem Details (`application/problem+json`) with stable `type` values, and **MUST** include an `errorCode` (§2.6).
 
 Example:
 ```json
@@ -1586,25 +1588,32 @@ Example:
   "type": "https://ofscp.example/errors/invalid-payload",
   "title": "Invalid payload",
   "status": 400,
+  "errorCode": "bad_request",
   "detail": "Field 'content.text' is required",
   "instance": "/api/groups/grp_1/channels/chn_general/messages"
 }
 ```
 
-Common status codes:
+**Error code registry (Normative).** Each `errorCode` has a fixed HTTP status. The same codes are used for the `code` of WebSocket `error` events (below).
 
-| Status | Meaning |
-| --- | --- |
-| 400 | Invalid payload/schema mismatch |
-| 401 | Missing/invalid token |
-| 403 | Permission denied |
-| 404 | Channel or message not found |
-| 409 | Duplicate client message ID |
-| 503 | Provider temporarily unavailable |
+| Status | `errorCode` | Meaning |
+| --- | --- | --- |
+| 400 | `bad_request` | Invalid payload, parameters, or schema mismatch |
+| 401 | `unauthorized` | Missing or invalid signature or credentials (§4.5) |
+| 403 | `forbidden` | Authenticated, but not permitted (including federation policy, §8) |
+| 404 | `not_found` | No such resource, or not visible to the caller |
+| 409 | `conflict` | The request conflicts with current state (e.g. a single-use invite already used) |
+| 413 | `payload_too_large` | The request or upload exceeds the provider's size limit |
+| 429 | `too_many_requests` | Rate limited; honour `Retry-After` when present |
+| 429 | `subscription_limit` | Too many live subscriptions on one WebSocket connection (§7.1) |
+| 500 | `internal_error` | Unexpected provider error |
+| 503 | `service_unavailable` | Temporarily unavailable, including a full replay store (§4.5); honour `Retry-After` when present |
+
+Providers **MAY** use additional codes for more specific conditions, but each **MUST** be paired with the status a client would expect for its nearest registry code, so that a client falling back to `status` still behaves sensibly. A duplicate `clientMessageId` is **not** an error: the provider returns the existing message (§7.1).
 
 #### WebSocket error messages
 
-Providers **SHOULD** return errors as WebSocket messages with `type: "error"`.
+Providers **SHOULD** return errors as WebSocket messages with `type: "error"`. The event's `code` **MUST** be an `errorCode` from the registry above, and its `status` the matching HTTP status.
 
 Example:
 ```json
