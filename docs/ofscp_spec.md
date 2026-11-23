@@ -412,7 +412,7 @@ A provider receiving a signed request **MUST** perform the following checks **in
 3. Verify `X-OFSCP-Timestamp` is within ±300 seconds of local time → `401`.
 4. Verify that `(X-OFSCP-Key-ID, X-OFSCP-Nonce)` has not been seen within the replay window → `401`. Providers **MUST** retain each seen nonce until its `X-OFSCP-Timestamp` plus the skew window has passed — up to twice the skew window after receipt, since a timestamp may be ahead of local time — and reject duplicates.
 5. Recompute `SHA-256` of the received body and confirm it matches `X-OFSCP-Content-Digest` → `400`.
-6. Resolve the actor's public keys (§4.6), select the key whose `key_id` matches `X-OFSCP-Key-ID`, and confirm it is not revoked → `401`.
+6. Resolve the actor's public keys (§4.6), select the key whose `key_id` matches `X-OFSCP-Key-ID`, and confirm it is not revoked → `401` (or `503` if the keys could not be fetched at all, §4.6).
 7. Reconstruct the canonical string (§4.4.2) and verify the Ed25519 signature → `401`.
 
 Only after **all** checks pass is the request authenticated as the actor. Authorization (group/channel membership, tier, etc.) is then applied separately.
@@ -446,9 +446,9 @@ Response:
 
 Providers **MUST** omit revoked keys.
 
-**Unknown, disabled or keyless handles.** For a syntactically valid handle (§2.2.1), the provider **MUST** answer `200` with `"keys": []` whether the handle is unknown, belongs to a disabled or deleted account, or simply has no active keys. The status code and body shape **MUST NOT** reveal which, so the endpoint can't be used to enumerate accounts (compare §4.1.2 login and `POST /api/auth/recover`). `actor` is the canonical actor (§2.2) formed from the requested handle. A handle that is not syntactically valid names no possible account, so a provider **MAY** answer `404` `not_found` for it (or the same empty `200`). Verifiers **MUST** treat `404` and an empty `keys` list the same way: no key matches, and the request fails verification with `401` (§4.5).
+**Unknown, disabled or keyless handles.** For a syntactically valid handle (§2.2.1), the provider **MUST** answer `200` with `"keys": []` whether the handle is unknown, belongs to a disabled or deleted account, or simply has no active keys. The status code and body shape **MUST NOT** reveal which, so the endpoint can't be used to enumerate accounts (compare §4.1.2 login and §4.1.3 recovery). `actor` is the canonical actor (§2.2) formed from the requested handle. `cache_until` and every other field **MUST** be computed the same way in all of these empty cases. A handle that is not syntactically valid (for example one containing uppercase letters) names no possible account, so a provider **MAY** answer `404` `not_found` for it (or the same empty `200`). The provider **MUST NOT** lowercase or otherwise rewrite the handle and then serve another handle's keys. Verifiers **MUST** treat `404` and an empty `keys` list the same way: no key matches, and the request fails verification with `401` (§4.5).
 
-Verifiers **MAY** cache until `cache_until`, but on a verification failure for a `key_id` they believe should be valid, they **MUST** re-fetch before finally rejecting, so that newly-rotated keys are picked up promptly.
+Verifiers **MAY** cache until `cache_until`, including an empty list. However, when a request's `key_id` is absent from the cached list, or fails verification against a key they believe should be valid, they **MUST** re-fetch before finally rejecting, so that newly registered or rotated keys are picked up promptly. Verifiers **MAY** limit these re-fetches per actor (for example to one per minute) to bound the cost of requests carrying bogus key ids. If the keys cannot be fetched (network error, timeout, `5xx` or `429`) and no cached key matches, the verifier **MUST NOT** accept the request, and **SHOULD** answer `503` `service_unavailable` rather than `401`, because the signature was never actually checked.
 
 ### 4.7. Key Management
 
