@@ -412,7 +412,7 @@ A provider receiving a signed request **MUST** perform the following checks **in
 3. Verify `X-OFSCP-Timestamp` is within ±300 seconds of local time → `401`.
 4. Verify that `(X-OFSCP-Key-ID, X-OFSCP-Nonce)` has not been seen within the replay window → `401`. Providers **MUST** retain each seen nonce until its `X-OFSCP-Timestamp` plus the skew window has passed — up to twice the skew window after receipt, since a timestamp may be ahead of local time — and reject duplicates.
 5. Recompute `SHA-256` of the received body and confirm it matches `X-OFSCP-Content-Digest` → `400`.
-6. Resolve the actor's public keys (§4.6), select the key whose `key_id` matches `X-OFSCP-Key-ID`, and confirm it is not revoked → `401`.
+6. Resolve the actor's public keys (§4.6), select the key whose `key_id` matches `X-OFSCP-Key-ID`, and confirm it is not revoked → `401` (or `503` when the keys could not be fetched or a re-fetch was rate-limited, §4.6).
 7. Reconstruct the canonical string (§4.4.2) and verify the Ed25519 signature → `401`.
 
 Only after **all** checks pass is the request authenticated as the actor. Authorization (group/channel membership, tier, etc.) is then applied separately.
@@ -444,7 +444,15 @@ Response:
 }
 ```
 
-Providers **MUST** omit revoked keys. Verifiers **MAY** cache until `cache_until`, but on a verification failure for a `key_id` they believe should be valid, they **MUST** re-fetch before finally rejecting, so that newly-rotated keys are picked up promptly.
+Providers **MUST** omit revoked keys.
+
+**Unknown, disabled or keyless handles.** For a syntactically valid handle (§2.2.1), the provider **MUST** answer `200` with `"keys": []` whether the handle is unknown, belongs to a disabled or deleted account, or simply has no active keys. The status code and body shape **MUST NOT** reveal which, so the endpoint can't be used to enumerate accounts (compare §4.1.2 login and §4.1.3 recovery). `actor` is the canonical actor (§2.2) formed from the requested handle. `cache_until` and every other field **MUST** be computed the same way in all of these empty cases. A handle that is not syntactically valid (for example one containing uppercase letters) names no possible account, so a provider **MAY** answer `404` `not_found` for it (or the same empty `200`). The provider **MUST NOT** lowercase or otherwise rewrite the handle and then serve another handle's keys. Verifiers **MUST** treat `404` and an empty `keys` list the same way: no key matches, and the request fails verification with `401` (§4.5).
+
+Verifiers **MAY** cache until `cache_until`, including an empty list. However, when a request's `key_id` is absent from the cached list, or fails verification against a key they believe should be valid, they **MUST** re-fetch before finally rejecting, so that newly registered or rotated keys are picked up promptly. Verifiers **MAY** limit these re-fetches per actor (for example to one per minute) to bound the cost of requests carrying bogus key ids. When the limit suppresses a re-fetch and no cached key matches, the verifier **SHOULD** answer `503` `service_unavailable` with `Retry-After` (the time until a re-fetch is allowed) rather than `401`, so a client whose key was just registered retries instead of treating its credentials as bad. The outcome of a fetch is classified as follows:
+
+* `200` with a list: use it (an empty list means no key matches → `401`).
+* `404`: no key matches → `401`.
+* Any other answer — a network error, timeout, a `5xx`, `429`, any other `4xx`, or a body that is not a valid keys response — is a **fetch failure**: if no cached key matches, the verifier **MUST NOT** accept the request, and **SHOULD** answer `503` `service_unavailable` rather than `401`, because the signature was never actually checked.
 
 ### 4.7. Key Management
 
@@ -1642,7 +1650,7 @@ Example:
 | 413 | `payload_too_large` | The request or upload exceeds the provider's size limit |
 | 429 | `too_many_requests` | Rate limited; honour `Retry-After` when present |
 | 500 | `internal_error` | Unexpected provider error |
-| 503 | `service_unavailable` | Temporarily unavailable, including a full replay store or the replay-store warm-up after a restart (§4.5); honour `Retry-After` when present |
+| 503 | `service_unavailable` | Temporarily unavailable, including a full replay store, the replay-store warm-up after a restart (§4.5), or a verifier that could not fetch the signer's public keys or discovery document (§4.6, §8.1); honour `Retry-After` when present |
 
 Providers **MAY** use additional codes for more specific conditions, but each **MUST** be paired with the status a client would expect for its nearest registry code, so that a client falling back to `status` still behaves sensibly. A duplicate `clientMessageId` is **not** an error: the provider returns the existing message (§7.1).
 
@@ -1961,7 +1969,7 @@ To verify, the recipient:
 1. Performs §4.5 steps 1–5 (header presence, authority match, timestamp skew, nonce replay, body digest).
 2. Fetches the signing provider's discovery document, selects the `provider.publicKeys` entry matching `X-OFSCP-Key-ID`, and verifies the Ed25519 signature (as in §4.5 step 7).
 
-Recipients **MAY** cache discovery per its HTTP caching headers, but **MUST** re-fetch on a verification failure for a `key_id` they believe should be valid (mirroring §4.6) so key rotation is picked up promptly.
+Recipients **MAY** cache discovery per its HTTP caching headers. The re-fetch and failure rules of §4.6 apply, with the discovery document in place of the keys endpoint and the signing provider in place of the actor: when `X-OFSCP-Key-ID` is absent from the cached `provider.publicKeys`, or fails verification against a key believed valid, the recipient **MUST** re-fetch before finally rejecting (it **MAY** rate-limit these re-fetches per provider, answering `503` with `Retry-After` when it suppresses one); if discovery cannot be fetched (network error, timeout, any non-`200` answer, or an invalid document) and no cached key matches, it **MUST NOT** accept the request and **SHOULD** answer `503` `service_unavailable`.
 
 ### 8.2. Remote channel participation
 
@@ -2292,7 +2300,8 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Apply the outbound-request rules (https only, public addresses only, no redirects) to every request to a host named by someone else (§8)
 - [ ] Allow cross-origin access per §3.4 (CORS preflight and headers; no `Origin` check on WebSocket upgrades)
 - [ ] Authenticate WebSocket connections via the signed `auth.challenge`/`authenticate` handshake (§7.1)
-- [ ] Serve user public keys via the `/.well-known/ofscp/users/{handle}/keys` endpoint
+- [ ] Serve user public keys via the `/.well-known/ofscp/users/{handle}/keys` endpoint (`200` + `keys: []` for any well-formed unknown, disabled or keyless handle, §4.6)
+- [ ] Re-fetch keys or discovery on an unknown `key_id` before rejecting; answer `503`, not `401`, when they cannot be fetched (§4.6, §8.1)
 - [ ] Support group and channel management (create/read/update/delete) with the permission model (§5.5)
 - [ ] Support group membership: join/leave, member listing, roles, per-group nicknames, `member.updated`, and the `request` approval flow (§5.7)
 - [ ] Support message edit (author-only, `editUntil`) and tombstone delete (§7.1)
