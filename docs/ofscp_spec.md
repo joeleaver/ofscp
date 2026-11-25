@@ -159,6 +159,8 @@ Content-Type: application/json
 
 Providers **MUST** include a `protocolVersion` matching this specification’s SemVer rules.
 
+`provider.domain` **MUST** be the provider's own canonical authority (§2.2), the same value it signs as (`<authority>`, §4.4.2; `X-OFSCP-Provider`, §8.1): lowercased, with `:port` only if non-default, so a provider served at `social.example:8443` publishes `"domain": "social.example:8443"`. A reader **MUST** check it: after canonicalizing it (§2.2), it **MUST** equal the canonical authority the document was fetched from. A document whose `provider.domain` differs (or is missing) is **invalid**, and the reader **MUST NOT** use it — not its `publicKeys` (§8.1), nor anything else in it.
+
 Clients **MAY** cache discovery documents, but providers **SHOULD** set HTTP caching headers (e.g. `Cache-Control`, `ETag`).
 
 ### 3.2. Standard API base path (Normative)
@@ -412,7 +414,7 @@ A provider receiving a signed request **MUST** perform the following checks **in
 3. Verify `X-OFSCP-Timestamp` is within ±300 seconds of local time → `401`.
 4. Verify that `(X-OFSCP-Key-ID, X-OFSCP-Nonce)` has not been seen within the replay window → `401`. Providers **MUST** retain each seen nonce until its `X-OFSCP-Timestamp` plus the skew window has passed — up to twice the skew window after receipt, since a timestamp may be ahead of local time — and reject duplicates.
 5. Recompute `SHA-256` of the received body and confirm it matches `X-OFSCP-Content-Digest` → `400`.
-6. Resolve the actor's public keys (§4.6), select the key whose `key_id` matches `X-OFSCP-Key-ID`, and confirm it is not revoked → `401` (or `503` when the keys could not be fetched or a re-fetch was rate-limited, §4.6).
+6. Resolve the actor's public keys (§4.6), select the key whose `key_id` matches `X-OFSCP-Key-ID`, and confirm it is not revoked → `401` (or `503` when the keys could not be fetched or a re-fetch was rate-limited; `403` when federation policy denies the actor's provider, §4.6).
 7. Reconstruct the canonical string (§4.4.2) and verify the Ed25519 signature → `401`.
 
 Only after **all** checks pass is the request authenticated as the actor. Authorization (group/channel membership, tier, etc.) is then applied separately.
@@ -450,9 +452,12 @@ Providers **MUST** omit revoked keys.
 
 Verifiers **MAY** cache until `cache_until`, including an empty list. However, when a request's `key_id` is absent from the cached list, or fails verification against a key they believe should be valid, they **MUST** re-fetch before finally rejecting, so that newly registered or rotated keys are picked up promptly. Verifiers **MAY** limit these re-fetches per actor (for example to one per minute) to bound the cost of requests carrying bogus key ids. When the limit suppresses a re-fetch and no cached key matches, the verifier **SHOULD** answer `503` `service_unavailable` with `Retry-After` (the time until a re-fetch is allowed) rather than `401`, so a client whose key was just registered retries instead of treating its credentials as bad. The outcome of a fetch is classified as follows:
 
-* `200` with a list: use it (an empty list means no key matches → `401`).
+* `200` with a valid keys response: use its `keys` (an empty list means no key matches → `401`). A keys response is valid only if it matches the schema and its `actor`, after canonicalizing (§2.2), equals the actor whose keys were requested — the requested handle at the canonical authority the request was sent to. A response naming any other actor (e.g. `bob@remote` when `alice@remote` was asked for, or `alice@other`) is not a valid keys response, and the verifier **MUST NOT** use any of its keys.
 * `404`: no key matches → `401`.
 * Any other answer — a network error, timeout, a `5xx`, `429`, any other `4xx`, or a body that is not a valid keys response — is a **fetch failure**: if no cached key matches, the verifier **MUST NOT** accept the request, and **SHOULD** answer `503` `service_unavailable` rather than `401`, because the signature was never actually checked.
+* **No fetch is allowed.** Two refusals are policy, not failures, so retrying cannot help, and the verifier **MUST NOT** answer `503` for them:
+  * The actor's domain is one the verifier's federation policy denies (§8 Authorization): it **MUST NOT** fetch, and answers `403` `forbidden` (§7.3).
+  * The outbound-request rules (§8 Outbound requests) forbid the fetch — for example the domain is a non-public IP literal, or resolves to any non-public address: it **MUST NOT** fetch, and answers `401` `unauthorized`, because no key for that actor can ever be checked. (A name that fails to resolve at all — DNS timeout, `SERVFAIL`, `NXDOMAIN` — is a network error, so a fetch failure.)
 
 ### 4.7. Key Management
 
@@ -1969,7 +1974,7 @@ To verify, the recipient:
 1. Performs §4.5 steps 1–5 (header presence, authority match, timestamp skew, nonce replay, body digest).
 2. Fetches the signing provider's discovery document, selects the `provider.publicKeys` entry matching `X-OFSCP-Key-ID`, and verifies the Ed25519 signature (as in §4.5 step 7).
 
-Recipients **MAY** cache discovery per its HTTP caching headers. The re-fetch and failure rules of §4.6 apply, with the discovery document in place of the keys endpoint and the signing provider in place of the actor: when `X-OFSCP-Key-ID` is absent from the cached `provider.publicKeys`, or fails verification against a key believed valid, the recipient **MUST** re-fetch before finally rejecting (it **MAY** rate-limit these re-fetches per provider, answering `503` with `Retry-After` when it suppresses one); if discovery cannot be fetched (network error, timeout, any non-`200` answer, or an invalid document) and no cached key matches, it **MUST NOT** accept the request and **SHOULD** answer `503` `service_unavailable`.
+Recipients **MAY** cache discovery per its HTTP caching headers. The re-fetch and failure rules of §4.6 apply, with the discovery document in place of the keys endpoint and the signing provider in place of the actor: when `X-OFSCP-Key-ID` is absent from the cached `provider.publicKeys`, or fails verification against a key believed valid, the recipient **MUST** re-fetch before finally rejecting (it **MAY** rate-limit these re-fetches per provider, answering `503` with `Retry-After` when it suppresses one); if discovery cannot be fetched (network error, timeout, any non-`200` answer, or an invalid document — including one whose `provider.domain` is not the signing provider's canonical authority, §3.1) and no cached key matches, it **MUST NOT** accept the request and **SHOULD** answer `503` `service_unavailable`. When no fetch is allowed — the signing provider is denied by federation policy (`403` `forbidden`) or the outbound-request rules forbid contacting it (`401` `unauthorized`) — the §4.6 "no fetch is allowed" rules apply.
 
 ### 8.2. Remote channel participation
 
@@ -2302,6 +2307,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Authenticate WebSocket connections via the signed `auth.challenge`/`authenticate` handshake (§7.1)
 - [ ] Serve user public keys via the `/.well-known/ofscp/users/{handle}/keys` endpoint (`200` + `keys: []` for any well-formed unknown, disabled or keyless handle, §4.6)
 - [ ] Re-fetch keys or discovery on an unknown `key_id` before rejecting; answer `503`, not `401`, when they cannot be fetched (§4.6, §8.1)
+- [ ] Reject a keys response whose `actor` is not the requested actor, and a discovery document whose `provider.domain` is not the authority it was fetched from (§3.1, §4.6); answer `403` for a denied signer and `401` when the outbound-request rules forbid the fetch (§4.6, §8)
 - [ ] Support group and channel management (create/read/update/delete) with the permission model (§5.5)
 - [ ] Support group membership: join/leave, member listing, roles, per-group nicknames, `member.updated`, and the `request` approval flow (§5.7)
 - [ ] Support message edit (author-only, `editUntil`) and tombstone delete (§7.1)
