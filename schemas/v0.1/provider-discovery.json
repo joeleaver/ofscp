@@ -11,7 +11,8 @@
       "properties": {
         "domain": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The provider's canonical authority (spec §2.2): lowercased, with :port only if non-default. Readers MUST reject a document whose domain is not the authority it was fetched from (spec §3.1)."
         },
         "protocolVersion": {
           "type": "string",
