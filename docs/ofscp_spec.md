@@ -457,7 +457,9 @@ Verifiers **MAY** cache until `cache_until`, including an empty list. However, w
 * Any other answer — a network error, timeout, a `5xx`, `429`, any other `4xx`, or a body that is not a valid keys response — is a **fetch failure**: if no cached key matches, the verifier **MUST NOT** accept the request, and **SHOULD** answer `503` `service_unavailable` rather than `401`, because the signature was never actually checked.
 * **No fetch is allowed.** Two refusals are policy, not failures, so retrying cannot help, and the verifier **MUST NOT** answer `503` for them:
   * The actor's domain is one the verifier's federation policy denies (§8 Authorization): it **MUST NOT** fetch, and answers `403` `forbidden` (§7.3).
-  * The outbound-request rules (§8 Outbound requests) forbid the fetch — for example the domain is a non-public IP literal, or resolves to any non-public address: it **MUST NOT** fetch, and answers `401` `unauthorized`, because no key for that actor can ever be checked. (A name that fails to resolve at all — DNS timeout, `SERVFAIL`, `NXDOMAIN` — is a network error, so a fetch failure.)
+  * The outbound-request rules (§8 Outbound requests) forbid the fetch — for example the domain is a non-public IP literal, or resolves to any non-public address, and the operator has not explicitly allowed it as an internal peer: it **MUST NOT** fetch, and answers `401` `unauthorized`, because the actor's keys cannot currently be checked. (A name that fails to resolve at all — DNS timeout, `SERVFAIL`, `NXDOMAIN` — is a network error, so a fetch failure.)
+
+  As with a fetch failure, a cached key that matches is still used for the outbound-rules case; the refusal only replaces a fetch. A refusal is not permanent: it is re-evaluated, from fresh DNS, the next time a fetch would be needed.
 
 ### 4.7. Key Management
 
@@ -1445,7 +1447,7 @@ Authorization is not checked only once. When a change removes a subscribed actor
 | `4001` | Authentication failed, or the actor/provider is refused by federation policy (§8). |
 | `4003` | The connection's credentials were revoked: its device key was revoked (§4.7), or the account it authenticated as no longer exists (e.g. a guest account was claimed or merged, §4.8). The client **MUST NOT** reconnect with the same key. |
 
-A provider **MUST** close every connection authenticated with a device key, with `4003`, when that key is revoked. For connections from **remote** actors, the provider **SHOULD** periodically re-resolve the actor's keys (§4.6) and close with `4003` once the key is no longer published.
+A provider **MUST** close every connection authenticated with a device key, with `4003`, when that key is revoked. For connections from **remote** actors, the provider **SHOULD** periodically re-resolve the actor's keys (§4.6) and close with `4003` once the key is no longer published. Only a completed fetch shows that: a valid keys response without the key, or a `404` (§4.6). A fetch failure is not evidence of revocation, so the connection stays open. If the actor's provider becomes denied by federation policy, or the outbound-request rules (§8) now forbid fetching its keys, the provider closes with `4001`, not `4003`: the key was never revoked, so the client must not be told to retire it.
 
 #### Resuming after a disconnect
 
@@ -1646,7 +1648,7 @@ Example:
 | --- | --- | --- |
 | 400 | `bad_request` | Invalid payload, parameters, or schema mismatch |
 | 401 | `unauthorized` | Missing or invalid signature or credentials (§4.5) |
-| 403 | `forbidden` | Authenticated, but not permitted (including federation policy, §8) |
+| 403 | `forbidden` | Not permitted: authenticated but not authorized, or refused by federation policy (§8), which a provider decides from the claimed actor or provider domain, before the signature is checked (§4.5 step 6, §4.6) |
 | 403 | `registration_closed` | This provider does not accept self-registration (§4.1.1) |
 | 403 | `invite_required` | Registration needs a valid account invite, and none was supplied or the one supplied is not usable (§4.1.1) |
 | 404 | `not_found` | No such resource, or not visible to the caller |
