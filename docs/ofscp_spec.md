@@ -185,7 +185,7 @@ Discovery **MUST NOT** be used to redefine the standardized endpoint paths in th
 
 ### 3.4. Cross-origin access (CORS) (Normative)
 
-Browser clients served from one origin talk directly to many providers (their home provider, every remote channel's provider §8.5, and recipients' providers for DMs §8.3). Because OFSCP authenticates with request signatures rather than cookies, providers **MUST** allow cross-origin requests to every `/api/…` and `/.well-known/ofscp…` endpoint:
+Browser clients served from one origin talk directly to many providers (their home provider, every remote channel's provider §8.5, and recipients' providers for DMs §8.3). Because OFSCP authenticates with request signatures rather than cookies, providers **MUST** allow cross-origin requests to every endpoint in scope (see **Scope** below) — the standard `/api/…` endpoints and the `/.well-known/ofscp…` documents:
 
 * Answer a CORS preflight (`OPTIONS` with `Origin` and `Access-Control-Request-Method`) with `204` and:
   * `Access-Control-Allow-Origin: *`
@@ -196,6 +196,14 @@ Browser clients served from one origin talk directly to many providers (their ho
 * **MUST NOT** send `Access-Control-Allow-Credentials` — no OFSCP credential is ambient, so none is needed, and a wildcard origin with credentials is forbidden by browsers anyway.
 
 Likewise, providers **MUST NOT** reject a WebSocket upgrade (§7.1) because of its `Origin` header; the signed `authenticate` handshake is the access control.
+
+**Scope.** These requirements cover:
+
+* every request whose method and path match an endpoint this specification defines (§3.2), with each `{…}` placeholder matching exactly one non-empty path segment — whatever the provider serves there, so `GET /api/groups/export` matches `GET /api/groups/{groupId}` and is in scope. A preflight is judged by its path and its `Access-Control-Request-Method`: a preflight is in scope if that method and path match an endpoint this specification defines;
+* every `/.well-known/ofscp…` document;
+* every URL this specification has a browser client fetch or send to programmatically, wherever the provider hosts it (including a CDN or object store it uses): attachment `url`s (§5.8, whose `hash` a client may verify) and a pre-signed `uploadUrl` (§5.8). For these URLs the header lists above are replaced by what the flow needs: responses **MUST** carry `Access-Control-Allow-Origin: *` without `Access-Control-Allow-Credentials`, and the preflight for an `uploadUrl` **MUST** allow `PUT` and every request header the upload requires (at least `content-type`, plus any the storage service demands). The `X-OFSCP-*` headers are not required there, since these requests are not signed.
+
+They do not extend to a provider's own non-standard endpoints (§3.2) that match none of the above, even ones under `/api/`. A provider **MAY** serve those without CORS headers, and **SHOULD NOT** allow cross-origin access to any of them that relies on ambient authority — cookies, HTTP authentication, TLS client certificates, or the caller's network position (e.g. an IP allow-list or a loopback-only listener) — for example a cookie-authenticated administration API, because the premise above, that no credential is ambient, does not hold for them. If it does allow cross-origin access to such an endpoint, it **MUST NOT** send `Access-Control-Allow-Credentials` with it. A provider **SHOULD** keep its non-standard endpoints under a path prefix that matches no standard endpoint (e.g. `/api/admin/…`), since a request that matches one is in scope whatever it does. (CORS is not CSRF protection; an ambient-credential endpoint needs its own, such as `SameSite` cookies and a CSRF token.)
 
 ### 3.5. Provider Interconnection
 
@@ -2305,7 +2313,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Implement device key registration (bootstrap-authenticated), listing, and revocation, closing revoked keys' WebSocket connections with `4003` (§4.7)
 - [ ] Validate Ed25519 request signatures over the §4.4.2 canonical string, including authority binding and nonce replay rejection, with one bounded provider-wide replay store that records a nonce only after the signature verifies (§4.5)
 - [ ] Apply the outbound-request rules (https only, public addresses only, no redirects) to every request to a host named by someone else (§8)
-- [ ] Allow cross-origin access per §3.4 (CORS preflight and headers; no `Origin` check on WebSocket upgrades)
+- [ ] Allow cross-origin access per §3.4 (CORS preflight and headers; no `Origin` check on WebSocket upgrades) on every endpoint in §3.4's scope (standard endpoints, `/.well-known/ofscp…`, attachment and pre-signed upload URLs); non-standard ambient-credential endpoints SHOULD stay same-origin
 - [ ] Authenticate WebSocket connections via the signed `auth.challenge`/`authenticate` handshake (§7.1)
 - [ ] Serve user public keys via the `/.well-known/ofscp/users/{handle}/keys` endpoint (`200` + `keys: []` for any well-formed unknown, disabled or keyless handle, §4.6)
 - [ ] Re-fetch keys or discovery on an unknown `key_id` before rejecting; answer `503`, not `401`, when they cannot be fetched (§4.6, §8.1)
