@@ -197,6 +197,8 @@ Browser clients served from one origin talk directly to many providers (their ho
 
 Likewise, providers **MUST NOT** reject a WebSocket upgrade (§7.1) because of its `Origin` header; the signed `authenticate` handshake is the access control.
 
+**Scope.** These requirements cover the endpoints this specification defines, at the standard paths (§3.2), and every `/.well-known/ofscp…` document. They do not extend to a provider's own non-standard endpoints (§3.2), even ones under `/api/`. A provider **MAY** serve those without CORS headers, and **SHOULD NOT** allow cross-origin access to any of them that is authenticated by ambient credentials (cookies, HTTP authentication, TLS client certificates) — for example a cookie-authenticated administration API — because the premise above, that no credential is ambient, does not hold for them. If it does allow cross-origin access to such an endpoint, it **MUST NOT** send `Access-Control-Allow-Credentials` with it. A provider **MUST NOT** place a non-standard endpoint at a path this specification defines.
+
 ### 3.5. Provider Interconnection
 
 Providers **MAY** maintain a list of *known providers* (peers) to facilitate federation and discovery — optionally populated by manual peering, scraping incoming cross-provider interactions, or referral (querying peers' lists). This is specified in full in §8.6 (maintaining and sharing the list) and consumed by discovery in §11.2; it is optional throughout.
@@ -2305,7 +2307,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Implement device key registration (bootstrap-authenticated), listing, and revocation, closing revoked keys' WebSocket connections with `4003` (§4.7)
 - [ ] Validate Ed25519 request signatures over the §4.4.2 canonical string, including authority binding and nonce replay rejection, with one bounded provider-wide replay store that records a nonce only after the signature verifies (§4.5)
 - [ ] Apply the outbound-request rules (https only, public addresses only, no redirects) to every request to a host named by someone else (§8)
-- [ ] Allow cross-origin access per §3.4 (CORS preflight and headers; no `Origin` check on WebSocket upgrades)
+- [ ] Allow cross-origin access per §3.4 (CORS preflight and headers; no `Origin` check on WebSocket upgrades) on every standard endpoint; keep cookie-authenticated non-standard endpoints same-origin
 - [ ] Authenticate WebSocket connections via the signed `auth.challenge`/`authenticate` handshake (§7.1)
 - [ ] Serve user public keys via the `/.well-known/ofscp/users/{handle}/keys` endpoint (`200` + `keys: []` for any well-formed unknown, disabled or keyless handle, §4.6)
 - [ ] Re-fetch keys or discovery on an unknown `key_id` before rejecting; answer `503`, not `401`, when they cannot be fetched (§4.6, §8.1)
