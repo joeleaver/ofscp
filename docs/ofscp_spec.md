@@ -1452,7 +1452,7 @@ Authorization is not checked only once. When a change removes a subscribed actor
 
 | Code | Meaning |
 | --- | --- |
-| `4001` | Authentication failed, the actor/provider is refused by federation policy (§8), or the connection's key can no longer be confirmed (§7.1: its cache entry expired without a successful re-fetch). The key was not revoked; the client **MAY** reconnect and re-authenticate later. |
+| `4001` | Authentication failed, the actor/provider is refused by federation policy (§8), or the connection's key can no longer be confirmed (§7.1: its cache entry expired without a successful re-fetch). In that last case the key was not revoked, and the client **MAY** reconnect and re-authenticate later. |
 | `4003` | The connection's credentials were revoked: its device key was revoked (§4.7), or the account it authenticated as no longer exists (e.g. a guest account was claimed or merged, §4.8). The client **MUST NOT** reconnect with the same key. |
 
 A provider **MUST** close every connection authenticated with a device key, with `4003`, when that key is revoked.
@@ -1461,7 +1461,7 @@ For a connection from a **remote** actor, the provider holds the actor's keys un
 
 * **Re-resolve before expiry.** The provider **SHOULD** re-fetch the actor's keys (§4.6) before the cache entry for the connection's key expires (and **MAY** re-fetch more often), so that a live connection is not dropped needlessly.
 * **Key gone → `4003`.** If a completed fetch shows the key is no longer published — a valid keys response without it, or a `404` (§4.6) — the provider **MUST** close with `4003`. Only a completed fetch shows that.
-* **Key unconfirmed → `4001`.** A fetch that fails, is suppressed by the provider's own re-fetch limit, or is refused by the outbound-request rules (§8) is not evidence of revocation: the connection stays open while the unexpired cache entry still holds the key. When that entry reaches its `cache_until` without a completed fetch having refreshed it — whether or not the provider tried — the provider **MUST** close with `4001`.
+* **Key unconfirmed → `4001`.** A fetch that fails, is suppressed by the provider's own re-fetch limit, or is refused by the outbound-request rules (§8) is not evidence of revocation: the connection stays open while the unexpired cache entry still holds the key. When that entry reaches its `cache_until` without a completed fetch having refreshed it — whether or not the provider tried — the provider **MUST** close with `4001`. A provider that does not cache the actor's keys has no such entry: for it the key is unconfirmed as soon as a re-fetch fails, is suppressed or is refused, and it **MUST** close with `4001` then.
 * **Federation policy → `4001`.** If the actor's provider becomes denied by federation policy, the provider **MUST** close with `4001` at once, whatever its cache holds (§4.6).
 
 `4001` here tells the client its key was never revoked, so it must not retire it; `4003` is reserved for revocation.
