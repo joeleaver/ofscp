@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/ws/command-envelope.json",
+  "title": "OFSCP WebSocket client→server command envelope (v0.1)",
+  "description": "Envelope for client→server commands (§7.1). `id` is required, and `data` MUST be an object for every standard command. `ts` is optional: a provider MUST NOT reject a command for lacking it and MUST ignore its value, so this schema places no constraint on it.",
+  "allOf": [
+    { "$ref": "./envelope.json" },
+    {
+      "type": "object",
+      "required": ["id", "type", "data"],
+      "properties": {
+        "ts": {
+          "description": "Optional; providers ignore its value."
+        },
+        "data": { "type": "object" }
+      }
+    }
+  ]
+}

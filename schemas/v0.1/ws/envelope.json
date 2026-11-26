@@ -2,9 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/ofscp/schemas/v0.1/ws/envelope.json",
   "title": "OFSCP WebSocket Message Envelope (v0.1)",
+  "description": "Base envelope shared by every WebSocket message (§7.1). Direction-specific rules live in command-envelope.json (client→server: `data` an object; `ts` optional and ignored) and event-envelope.json (server→client: `ts` required). `ping` and `pong`, which either party may send, use this base envelope; when the provider sends one it MUST include `ts`.",
   "type": "object",
   "additionalProperties": true,
-  "required": ["id", "type", "ts", "data"],
+  "required": ["id", "type", "data"],
   "properties": {
     "id": {
       "type": "string",
@@ -17,7 +18,7 @@
       "description": "WebSocket message type string."
     },
     "ts": {
-      "$ref": "../defs/common.json#/$defs/Rfc3339DateTime"
+      "description": "RFC 3339 timestamp. Required on server→client events (event-envelope.json); optional on client→server commands, where providers ignore its value (command-envelope.json)."
     },
     "correlationId": {
       "type": "string",

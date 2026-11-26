@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/ws/event-envelope.json",
+  "title": "OFSCP WebSocket server→client event envelope (v0.1)",
+  "description": "Envelope for server→client events (§7.1). `ts` is required and MUST be an RFC 3339 timestamp.",
+  "allOf": [
+    { "$ref": "./envelope.json" },
+    {
+      "type": "object",
+      "required": ["id", "type", "ts", "data"],
+      "properties": {
+        "ts": { "$ref": "../defs/common.json#/$defs/Rfc3339DateTime" }
+      }
+    }
+  ]
+}

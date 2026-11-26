@@ -4,7 +4,7 @@
   "title": "OFSCP WS dm.typing event (v0.1)",
   "description": "Emitted to a DM conversation's subscribers when a participant starts or stops typing (§7.4). DM-scoped mirror of channel.typing, keyed by dmId. Soft state with the auto-expiry and disconnect rules of §7.1.",
   "allOf": [
-    { "$ref": "./envelope.json" },
+    { "$ref": "./event-envelope.json" },
     {
       "type": "object",
       "required": ["type", "data"],

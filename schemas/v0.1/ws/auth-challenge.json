@@ -3,7 +3,7 @@
   "$id": "https://example.invalid/ofscp/schemas/v0.1/ws/auth-challenge.json",
   "title": "OFSCP WS auth.challenge event (v0.1)",
   "allOf": [
-    { "$ref": "./envelope.json" },
+    { "$ref": "./event-envelope.json" },
     {
       "type": "object",
       "required": ["type", "data"],

@@ -1,0 +1,8 @@
+{
+  "id": "cli_301",
+  "type": "typing.stop",
+  "ts": "not a timestamp",
+  "data": {
+    "channelId": "chn_general"
+  }
+}

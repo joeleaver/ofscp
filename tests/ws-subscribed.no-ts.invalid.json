@@ -1,0 +1,8 @@
+{
+  "id": "evt_100",
+  "type": "subscribed",
+  "correlationId": "cli_001",
+  "data": {
+    "channels": ["chn_general"]
+  }
+}

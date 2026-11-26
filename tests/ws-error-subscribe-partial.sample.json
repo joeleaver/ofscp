@@ -1,0 +1,12 @@
+{
+  "id": "evt_err_2",
+  "type": "error",
+  "correlationId": "cli_001",
+  "ts": "2026-01-01T12:00:00Z",
+  "data": {
+    "code": "not_found",
+    "message": "No such channel",
+    "status": 404,
+    "details": { "channels": ["chn_missing"] }
+  }
+}

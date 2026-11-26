@@ -7,9 +7,10 @@
     { "$ref": "./envelope.json" },
     {
       "type": "object",
-      "required": ["type"],
+      "required": ["type", "data"],
       "properties": {
-        "type": { "const": "ping" }
+        "type": { "const": "ping" },
+        "data": { "type": "object" }
       }
     }
   ]

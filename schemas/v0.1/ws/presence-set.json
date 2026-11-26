@@ -4,7 +4,7 @@
   "title": "OFSCP WS presence.set command (v0.1)",
   "description": "Sets the authenticated actor's presence over the WebSocket — equivalent to PUT /api/me/presence (§6.4). `offline` is connection-derived and is not a valid value here; the provider sets it on disconnect/heartbeat timeout (§7.1).",
   "allOf": [
-    { "$ref": "./envelope.json" },
+    { "$ref": "./command-envelope.json" },
     {
       "type": "object",
       "required": ["type", "data"],

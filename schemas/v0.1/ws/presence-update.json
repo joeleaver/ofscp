@@ -4,7 +4,7 @@
   "title": "OFSCP WS presence.update event (v0.1)",
   "description": "Emitted to subscribers when a subject's presence changes (§6.7-WS / §7.5). Viewers not permitted by the subject's §6.1 visibility policy receive a uniform `offline` presence, indistinguishable from genuinely offline.",
   "allOf": [
-    { "$ref": "./envelope.json" },
+    { "$ref": "./event-envelope.json" },
     {
       "type": "object",
       "required": ["type", "data"],
