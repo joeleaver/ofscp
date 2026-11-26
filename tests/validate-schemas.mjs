@@ -199,7 +199,9 @@ async function main() {
   // normative, so loosening the schema fails the suite.
   const rejectCases = [
     // §6.4 / §7.5: `offline` is connection-derived, never settable.
-    ['tests/presence-update-request.offline.invalid.json', 'schemas/v0.1/presence-update-request.json']
+    ['tests/presence-update-request.offline.invalid.json', 'schemas/v0.1/presence-update-request.json'],
+    // §4.3.2: `public_key` is the raw 32-byte key, not a DER SubjectPublicKeyInfo.
+    ['tests/device-key-registration.spki.invalid.json', 'schemas/v0.1/device-key-registration.json']
   ];
 
   for (const [samplePath, schemaPath] of rejectCases) {
