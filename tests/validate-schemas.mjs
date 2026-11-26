@@ -60,7 +60,9 @@ async function main() {
     ['tests/provider-discovery.sample.json', 'schemas/v0.1/provider-discovery.json'],
     ['tests/user-profile.sample.json', 'schemas/v0.1/user-profile.json'],
     ['tests/presence.sample.json', 'schemas/v0.1/presence.json'],
+    ['tests/presence-update-request.sample.json', 'schemas/v0.1/presence-update-request.json'],
     ['tests/privacy-settings.sample.json', 'schemas/v0.1/privacy-settings.json'],
+    ['tests/privacy-settings-update-request.sample.json', 'schemas/v0.1/privacy-settings-update-request.json'],
     ['tests/group.sample.json', 'schemas/v0.1/group.json'],
     ['tests/channel.sample.json', 'schemas/v0.1/channel.json'],
     ['tests/group-create-request.sample.json', 'schemas/v0.1/group-create-request.json'],
@@ -191,6 +193,27 @@ async function main() {
     }
 
     console.log(`OK: ${path.basename(samplePath)} validates against ${path.basename(schemaPath)}`);
+  }
+
+  // Samples a schema MUST reject: each pins a rule the spec states as
+  // normative, so loosening the schema fails the suite.
+  const rejectCases = [
+    // §6.4 / §7.5: `offline` is connection-derived, never settable.
+    ['tests/presence-update-request.offline.invalid.json', 'schemas/v0.1/presence-update-request.json']
+  ];
+
+  for (const [samplePath, schemaPath] of rejectCases) {
+    const schema = await loadJson(schemaPath);
+    const validate = ajv.getSchema(schema.$id) ?? (await ajv.compileAsync(schema));
+    const sample = await loadJson(samplePath);
+
+    if (validate(sample)) {
+      console.error(`Expected rejection: ${samplePath} unexpectedly validates against ${schemaPath}`);
+      process.exitCode = 1;
+      continue;
+    }
+
+    console.log(`OK: ${path.basename(samplePath)} is rejected by ${path.basename(schemaPath)}`);
   }
 
   // The request-signing vector (§4.4.3) signs a POST that creates a channel

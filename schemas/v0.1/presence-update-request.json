@@ -2,5 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/ofscp/schemas/v0.1/presence-update-request.json",
   "title": "OFSCP PUT /api/me/presence request (v0.1)",
-  "$ref": "./presence.json"
+  "description": "Full replace of the caller's own presence (§6.4), equivalent to the WebSocket presence.set command (§7.5). An absent `status` clears it. `offline` is connection-derived and not settable (§7.5); `lastSeen` is set by the provider, not sent by the client.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["availability"],
+  "properties": {
+    "availability": {
+      "type": "string",
+      "enum": ["online", "away", "dnd"]
+    },
+    "status": { "type": "string" },
+    "metadata": { "$ref": "./defs/objects.json#/$defs/MetadataList" }
+  }
 }

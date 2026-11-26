@@ -432,6 +432,8 @@ A provider receiving a signed request **MUST** perform the following checks **in
 
 Only after **all** checks pass is the request authenticated as the actor. Authorization (group/channel membership, tier, etc.) is then applied separately.
 
+**Anonymous viewers (Normative).** A request that carries **any** `X-OFSCP-*` signature header is a signed request, and the checks above apply to it in full. Some routes accept **anonymous readers**: `GET /api/groups/{groupId}` (§5.5), channel reads that effective read access permits to anyone (§11.3), and the §6 `GET` endpoints (§6.1). On such a route, a request carrying **none** of those headers is not a missing signature: the provider **MUST** handle it as an **anonymous viewer**, who satisfies only `public`-level access (`public`/`discoverable` tiers, §11; the `public` visibility, §6.1) and is never a member, contact or list entry. An authorization failure for an anonymous viewer is answered exactly as for a signed caller who is not permitted (`403`, or the surface's own answer: `404` for a hidden channel, §11.3; the uniform responses of §6.1), never `401`. `401` is only for a signed request that fails the checks above, or for an unsigned request to a route that does not accept anonymous readers (step 1).
+
 **Replay store (Normative).** A provider **MUST** keep a **single** replay store covering every surface that accepts a request signature: all signed REST routes and provider-signed federation requests (§8.1). (The WebSocket `authenticate` handshake, §7.1, is protected by its per-connection challenge nonce instead; a provider **MAY** also record handshakes in the store.) Separate per-route or per-transport stores let a captured request be replayed against a different surface. Entries are keyed by **(signer kind, `key_id`, nonce)**, where the signer kind is *actor* (user-signed, §4.4) or *provider* (provider-signed, §8.1): the two `key_id` spaces are chosen independently and **MUST NOT** collide in the shared store.
 
 Step 4 only *checks* the store. A provider **MUST NOT** record a pair until step 7 has succeeded; it then re-checks and records the pair atomically (a concurrent copy of the request may have verified in the meantime). Recording earlier would let unauthenticated traffic fill the store, and let a forged request burn a nonce the genuine signer is about to use. The store **MUST** be bounded; when it is full the provider **MUST** fail closed — reject with **`503`** (and `Retry-After`) — rather than evict an unexpired entry, which would reopen that nonce to replay.
@@ -651,7 +653,7 @@ A channel **MAY** carry an optional `permissions` object that refines the group'
 
 * **Grant actions** — `view`, `post:message`, `post:memo`, `post:article`, and `react` — use the same **exact-membership** rule as group permissions: an actor is allowed **iff their role is listed** for the action (`owner` is always allowed). There is no rank inheritance. Providers **MAY** define additional channel actions or roles.
 * **Fallback.** When the channel omits an action, the channel inherits the group equivalent: each `post:<type>` falls back to the group's `post` action; `view` falls back to the channel `tier` semantics (§11); `react` falls back to "any actor permitted to read the channel may react" (the v0.1 default). A channel with no `permissions` object therefore behaves exactly as in v0.1 prior to this addition.
-* **`view`.** When present, only members whose role is listed in `view` may read the channel (list messages, subscribe, receive fan-out), **overriding** the channel `tier`. This lets, for example, a `public`-tier group restrict an individual channel to admins. When absent, channel read access follows `tier`. An actor who cannot read a channel (§11.3) cannot post in it either: a create there **MUST** be answered `404`, as for a channel that does not exist, never `403` (§7.1).
+* **`view`.** When present, `view` **narrows** read access (list messages, subscribe, receive fan-out) to the listed roles: an actor must still pass the group and channel `tier` (§11.3), **and** hold a listed role. Only members hold roles, so a present `view` makes the channel members-only even under a `public` tier; the `owner` always passes. This lets, for example, a `public`-tier group restrict an individual channel to admins. When absent, channel read access follows `tier`. An actor who cannot read a channel (§11.3) cannot post in it either: a create there **MUST** be answered `404`, as for a channel that does not exist, never `403` (§7.1, §11.3).
 * **`post:<type>`.** Gates creation of a message of that `type` (§5.3) in the channel. A create (the `message.create` command or `POST …/messages`, §7.1) whose `type` the actor is not permitted to post **MUST** be rejected with `403`; a create without `type` is a `message`.
 * **`react`.** Gates adding reactions (§7) in the channel.
 * **`replyOnly`** is a **restriction**, not a grant. An actor is *reply-restricted* when their role **is listed** in `replyOnly` — **except `owner`, who is never reply-restricted**. A reply-restricted actor may post **only** a reply: a message whose `reference` (§5.3) has `type` `"reply"` and names an existing message in the same channel. A create without a `reference` (a top-level post) **MUST** be rejected with `403`; a create whose `reference` is not such a reply is rejected with `400` (§7.1), so it is never accepted either. (Example: `"replyOnly": ["member", "guest"]` restricts `member` and `guest`.)
@@ -832,7 +834,7 @@ Fetches metadata for a single group.
 
 **Authorization:**
 - `public` / `discoverable` groups: no authentication required. Providers **MUST** accept an unsigned request here; a signed request is also accepted, subject to the inbound federation policy of §8 (*Authorization*).
-- `private` / `group` groups: the request must be signed (§4.4) by a member (local or remote) of the group.
+- `private` / `group` groups: the request must be signed (§4.4) by a member (local or remote) of the group. An unsigned request is an anonymous viewer (§4.5) and gets `403`, like a signed non-member.
 
 **Response (200 OK):**
 ```json
@@ -856,7 +858,8 @@ Fetches metadata for a single group.
 
 **Errors:**
 - `404 Not Found`: Group does not exist
-- `403 Forbidden`: Private group and caller is not a member
+- `403 Forbidden`: Private group and caller is not a member (including an unsigned caller)
+- `401 Unauthorized`: a signed request that fails §4.5
 
 **Federation:** Remote providers MAY query this endpoint to display group info to users considering joining. Providers MUST enforce tier visibility rules for federated requests.
 
@@ -896,23 +899,23 @@ Creates a channel in the group.
 { "name": "general", "type": "text", "tier": "public", "topic": "General discussion", "tags": ["announcements"] }
 ```
 
-`type` is **REQUIRED** and immutable. **Response (`201 Created`):** the created `Channel`.
+`type` is **REQUIRED** and immutable; all other fields are optional and providers **SHOULD** apply sensible defaults (RECOMMENDED: `tier: "private"`). **Response (`201 Created`):** the created `Channel`.
 
 #### GET /api/groups/{groupId}/channels/{channelId}
 
-Fetches a single channel. **Authorization:** effective read access (§11.3); an unsigned request is accepted when that rule permits anonymous readers. **Errors:** `403`, `404`.
+Fetches a single channel. **Authorization:** effective read access (§11.3); an unsigned request is an anonymous viewer (§4.5). **Errors:** `403` (caller cannot read the group, as for `GET /api/groups/{groupId}`), `404` (no such channel, or the caller can read the group but not the channel, §11.3).
 
 #### PATCH /api/groups/{groupId}/channels/{channelId}
 
 Partially updates a channel (name, tier, topic, tags, metadata). `type` cannot be changed.
 
-**Authorization:** group `manage` role. **Response (`200 OK`):** the updated `Channel`. **Errors:** `403`, `404`.
+**Authorization:** group `manage` role. **Response (`200 OK`):** the updated `Channel`. **Errors:** `403` (caller cannot read the group, or can read the channel but lacks `manage`), `404` (no such channel, or the caller can read the group but not the channel, §11.3).
 
 #### DELETE /api/groups/{groupId}/channels/{channelId}
 
 Deletes a channel.
 
-**Authorization:** group `manage` role. **Response:** `204 No Content`. **Errors:** `403`, `404`.
+**Authorization:** group `manage` role. **Response:** `204 No Content`. **Errors:** `403` (caller cannot read the group, or can read the channel but lacks `manage`), `404` (no such channel, or the caller can read the group but not the channel, §11.3).
 
 ### 5.6. Invites & Join Links
 
@@ -1066,22 +1069,37 @@ To support per-user privacy controls without overloading `UserProfile` fields, p
 
 When a subject configures privacy for presence, profile extras (e.g. bio), or group memberships, providers **MUST** represent visibility using a small shared enum, with the values:
 
-* `public` — visible to anyone
-* `authenticated` — visible to any authenticated user
-* `sharedGroups` — visible only to viewers who share at least one group with the subject
-* `contacts` — visible only to DM contacts
+* `public` — visible to anyone, including an anonymous viewer (§4.5)
+* `authenticated` — visible to any viewer whose request is validly signed (§4.5), local or remote
+* `sharedGroups` — visible only to a signed viewer who shares at least one group with the subject: a group **the evaluating provider hosts** in which both are current members
+* `contacts` — visible only to DM contacts (a mutual accepted contact, §6.7)
 * `nobody` — visible to no one except the subject (and administrators as required)
 
 Providers **SHOULD** also implement an `allowList` and `denyList` that will override the privacy setting for users in these lists.
+
+**Evaluation (Normative).** A provider decides whether a viewer may see a subject's data as follows; the first rule that applies wins:
+
+1. The subject always sees their own data.
+2. A viewer in `denyList` is **not permitted**, whatever the setting (including `public`).
+3. A viewer in `allowList` is **permitted**, whatever the setting (including `nobody`).
+4. Otherwise the setting decides, as listed above.
+
+List entries are actors, canonicalized per §2.2 before storage and comparison. An anonymous viewer never matches either list, so it sees exactly what `public` allows. The maximum list size is provider-defined.
+
+**Reading another user's data (Normative).** The rules below apply to `GET /api/users/{userRef}/profile` (§6.2), `…/presence` (§6.4) and `…/groups` (§6.5):
+
+* **Viewers.** The routes accept anonymous readers (§4.5). An unsigned request is an anonymous viewer; a signed request that fails §4.5 is `401`. Inbound federation policy still applies to signed requests (`403`, §8 *Authorization*).
+* **Subject.** The provider serves only users it hosts. A `{userRef}` (§2.2) naming a user on another provider, or an unknown, disabled or invalid local handle, **MUST** be answered `404` (`not_found`) with the same body in every case, so the answer does not reveal which applies.
+* **Viewer not permitted.** When the evaluation above does not permit the viewer, the provider **MUST** answer `200` with a uniform response that is indistinguishable from a subject with nothing to show, **never** `403`: the base profile without extras (§6.2), `{ "availability": "offline", "metadata": [] }` (§6.4, as §7.5), or `{ "groups": [], "metadata": [] }` (§6.5).
 
 ### 6.2. Public profile endpoint
 
 ```http
 GET /api/users/{userRef}/profile
-X-OFSCP-Signature: <signed per §4.4>
+X-OFSCP-Signature: <signed per §4.4, or omitted for an anonymous viewer (§6.1)>
 ```
 
-**Response:** A `UserProfile` plus optional profile extras (such as `bio`) filtered by the subject’s profile visibility policy.
+**Response (`200 OK`):** the subject's `UserProfile` (§5.1.1), plus profile extras (such as `bio`) only when the subject's `profileVisibility` permits the viewer (§6.1). The base `UserProfile` is **always** returned, whatever `profileVisibility` is (even `nobody`), since it already appears in member lists and author fields (§5.1.1); `profileVisibility` governs only the extras. **Errors:** `401`, `403` and `404` as in §6.1.
 
 Example response:
 ```json
@@ -1135,10 +1153,10 @@ The provider checks the `avatar` URL as follows:
 
 ```http
 GET /api/users/{userRef}/presence
-X-OFSCP-Signature: <signed per §4.4>
+X-OFSCP-Signature: <signed per §4.4, or omitted for an anonymous viewer (§6.1)>
 ```
 
-Presence data returned **MUST** be filtered by the subject’s presence visibility policy.
+Presence data returned **MUST** be filtered by the subject’s presence visibility policy (§6.1). **Response (`200 OK`):** a `Presence` (`presence.json`); a viewer not permitted gets the uniform `offline` presence of §6.1. **Errors:** `401`, `403` and `404` as in §6.1.
 
 Example response:
 ```json
@@ -1166,16 +1184,18 @@ Example request:
 }
 ```
 
+The body is `presence-update-request.json`. It is a **full replace**, like `presence.set` (§7.5): `availability` is **REQUIRED** and is one of `online`, `away` or `dnd`, and an absent `status` clears it. `offline` is not settable (§7.5) and **MUST** be rejected with `400`. `lastSeen` is set by the provider, not the client. **Response (`200 OK`):** the caller's own presence (`presence.json`). **Errors:** `400`, `401` (§4.5).
+
 These REST endpoints are the non-WebSocket baseline. Connected clients **SHOULD** instead use real-time presence over the WebSocket (§7.5), which delivers `presence.update` events, derives online/offline from connection liveness, and applies the same visibility filtering as `GET /api/users/{userRef}/presence`.
 
 ### 6.5. Group memberships visible to viewer
 
 ```http
 GET /api/users/{userRef}/groups
-X-OFSCP-Signature: <signed per §4.4>
+X-OFSCP-Signature: <signed per §4.4, or omitted for an anonymous viewer (§6.1)>
 ```
 
-Response **MUST** only include groups visible to the viewer per the subject’s membership visibility settings.
+Response **MUST** only include groups visible to the viewer per the subject’s membership visibility settings (§6.1). Even when `membershipVisibility` permits the viewer, the listing **MUST** include only groups this provider hosts, and only those the viewer may read under the group's `tier` (§11, §11.3 condition 1): an anonymous viewer sees only `public`/`discoverable` groups. A viewer not permitted gets the uniform empty listing of §6.1. **Errors:** `401`, `403` and `404` as in §6.1.
 
 Example response:
 ```json
@@ -1228,6 +1248,8 @@ Example request:
   "metadata": []
 }
 ```
+
+`GET` returns the caller's full settings (`privacy-settings.json`); the defaults for a user who has set nothing are provider-defined. `PUT` is a **partial update** (`privacy-settings-update-request.json`): an absent field is left unchanged, and `[]` clears a list. List entries are canonicalized per §2.2. The provider **MUST** reject with `400` a request that would leave an actor in both `allowList` and `denyList`, or a list longer than its (provider-defined) maximum. **Response (`200 OK`):** the full updated settings (`privacy-settings.json`). **Errors:** `400`, `401` (§4.5).
 
 ### 6.7. Contacts
 
@@ -1454,7 +1476,7 @@ Server → Client:
 }
 ```
 
-Providers **MUST** enforce authorization (effective read access, §11.3) at subscription-time and reject unauthorized subscriptions.
+Providers **MUST** enforce authorization (effective read access, §11.3) at subscription-time and reject unauthorized subscriptions with an `error` event (§7.3). A channel the actor cannot read is rejected as one that does not exist (`not_found`, §11.3).
 
 Unsubscribe:
 ```json
@@ -1473,7 +1495,7 @@ Authorization is not checked only once. When a change removes a subscribed actor
 { "id": "evt_150", "type": "unsubscribed", "ts": "2026-01-01T12:30:00Z", "data": { "channels": ["chn_general"], "reason": "access_revoked" } }
 ```
 
-`reason` is `access_revoked` for the cases above; an `unsubscribed` that acknowledges a client's own `unsubscribe` omits it. Clients **MUST** treat an unsolicited `unsubscribed` as final for those channels (re-subscribing will be refused until access is restored).
+`reason` is `access_revoked` for the cases above; an `unsubscribed` that acknowledges a client's own `unsubscribe` omits it. Clients **MUST** treat an unsolicited `unsubscribed` as final for those channels (re-subscribing will be refused, as for a channel that does not exist, until access is restored; §11.3).
 
 #### Close codes
 
@@ -1577,7 +1599,7 @@ A memo with an image, then a reply to it, are created the same way:
 Rules (both transports):
 
 * The provider sets `id`, `author` (the authenticated actor), `createdAt` and `permissions`, and stores `type`, `content`, `attachments`, `reference`, `tags` and `metadata` as given, with the defaults above. The stored message is a `BaseMessage` (§5.3).
-* The provider **MUST** reject with **`404`** (`not_found`) a create in a group or channel that does not exist, or in a channel the actor cannot read (effective read access, §11.3). The two cases get the same answer: a create is answered as for a missing channel (§5.2.1, §7.3). (Other read paths, such as `GET` of a channel and `subscribe`, keep their own error codes.)
+* The provider **MUST** reject with **`404`** (`not_found`) a create in a group or channel that does not exist, or in a channel the actor cannot read (effective read access, §11.3). The two cases get the same answer: a create is answered as for a missing channel (§5.2.1, §7.3). (Read paths answer a channel the caller cannot read as `404` too, when the caller may read its group: §11.3.)
 * The provider **MUST** reject with **`403`** (`forbidden`) a create the actor may not make: one whose `type` the channel's `post:<type>` permission does not grant, or, when the actor is reply-restricted, one without a `reference` or one whose parent's `type` `replyOnlyTo` does not list (§5.2.1).
 * The provider **MUST** reject with **`400`** (`bad_request`) a body that does not match the schema, an invalid `Attachment` or metadata object, a `reference` whose `type` is not `"reply"`, or a `reference` whose `id` is not a message in the same channel (§7.2).
 * Over WebSocket, a rejection is an `error` event (§7.3) with the command's `id` in `correlationId`.
@@ -1704,6 +1726,8 @@ Paging parameters (Normative — they apply to every paginated OFSCP endpoint un
 
 Cursors are only valid on the endpoint (and, for messages, the channel or DM) that issued them.
 
+Channel history is served under effective read access (§11.3): an unsigned request is an anonymous viewer (§4.5), and a channel the caller cannot read is answered `404`, as one that does not exist.
+
 Response example:
 ```json
 {
@@ -1725,7 +1749,7 @@ Because a parent and its replies can be arbitrarily far apart in a paginated tim
 GET /api/groups/{groupId}/channels/{channelId}/messages/{messageId}/replies?cursor=…&direction=forward&limit=50
 ```
 
-It returns the same paginated shape as `…/messages` (`{ items: [ Message ], page: { nextCursor?, prevCursor? } }`, validated against `messages-page.json`), containing the messages whose `reference.id` equals `{messageId}`, ordered within the shared cursor space (§7.1). Access follows the channel read rules (`tier` and any channel `view` permission, §5.2.1). Message objects **MAY** additionally carry an advisory `replyCount` integer; it is a non-authoritative convenience (clients **MUST NOT** rely on it for correctness) and is forward-compatible via §2.3.
+It returns the same paginated shape as `…/messages` (`{ items: [ Message ], page: { nextCursor?, prevCursor? } }`, validated against `messages-page.json`), containing the messages whose `reference.id` equals `{messageId}`, ordered within the shared cursor space (§7.1). Access follows the channel read rules (`tier` and any channel `view` permission, §5.2.1), and a channel the caller cannot read is `404` (§11.3). Message objects **MAY** additionally carry an advisory `replyCount` integer; it is a non-authoritative convenience (clients **MUST NOT** rely on it for correctness) and is forward-compatible via §2.3.
 
 ### 7.3. Error semantics
 
@@ -1748,8 +1772,8 @@ Example:
 | Status | `errorCode` | Meaning |
 | --- | --- | --- |
 | 400 | `bad_request` | Invalid payload, parameters, or schema mismatch |
-| 401 | `unauthorized` | Missing or invalid signature or credentials (§4.5) |
-| 403 | `forbidden` | Not permitted: authenticated but not authorized, or refused by federation policy (§8), which a provider decides from the claimed actor or provider domain, before the signature is checked (§4.5 step 6, §4.6) |
+| 401 | `unauthorized` | Invalid signature or credentials, or a missing signature on a route that does not accept anonymous readers (§4.5) |
+| 403 | `forbidden` | Not permitted: authenticated (or an anonymous viewer, §4.5) but not authorized, or refused by federation policy (§8), which a provider decides from the claimed actor or provider domain, before the signature is checked (§4.5 step 6, §4.6) |
 | 403 | `registration_closed` | This provider does not accept self-registration (§4.1.1) |
 | 403 | `invite_required` | Registration needs a valid account invite, and none was supplied or the one supplied is not usable (§4.1.1) |
 | 404 | `not_found` | No such resource, or not visible to the caller |
@@ -1775,7 +1799,7 @@ Example:
   "ts": "2026-01-01T12:00:00Z",
   "data": {
     "code": "forbidden",
-    "message": "No access to channel chn_general",
+    "message": "Not permitted to post in channel chn_general",
     "status": 403
   }
 }
@@ -1961,7 +1985,7 @@ A connected client sets its own presence with `presence.set`, equivalent to `PUT
 { "id": "cli_602", "type": "presence.set", "ts": "2026-02-01T10:10:00Z", "data": { "availability": "dnd", "status": "In a meeting" } }
 ```
 
-`offline` is **not** a settable value — it is derived from connection liveness (below).
+Like `PUT /api/me/presence`, it is a **full replace**: an absent `status` clears it (§6.4). `offline` is **not** a settable value — it is derived from connection liveness (below) — and is rejected with an `error` (`bad_request`).
 
 #### Connection-derived online/offline
 
@@ -1997,7 +2021,7 @@ A follow is a **pointer**, not a copy. The provider stores only *which* channels
 #### Managing the follow list
 
 * `GET /api/me/follows` — returns `{ "follows": [ Follow ], "metadata": [] }`, where each `Follow` is `{ channel, groupId?, createdAt, metadata }` and `channel` is a channel reference (a URI for remote channels, §2.4).
-* `POST /api/me/follows` — body `{ "channel": "<ref>", "groupId"?: "<ref>" }`; starts following. The provider **SHOULD** verify the user currently has access to the channel and reject with **`403`** otherwise. **`201 Created`** returns the `Follow`. Idempotent: following an already-followed channel returns the existing entry.
+* `POST /api/me/follows` — body `{ "channel": "<ref>", "groupId"?: "<ref>" }`; starts following. The provider **SHOULD** verify the user currently has access to the channel and reject with **`404`** otherwise, as for a channel that does not exist (§11.3). **`201 Created`** returns the `Follow`. Idempotent: following an already-followed channel returns the existing entry.
 * `DELETE /api/me/follows/{channelRef}` — stops following. **`204 No Content`**.
 
 #### Composing the feed (client-side)
@@ -2129,7 +2153,7 @@ A provider advertises support with `capabilities.federation.realtimeDelivery: "d
 1. **Join first.** The remote user **MUST** already be a member of the channel, having joined via `POST /api/groups/{groupId}/channels/{channelId}/join` on the home provider (§8.2). Membership and channel/group tier (§8 Authorization) are what authorize real-time access; subscribing does **not** implicitly join.
 2. **Connect.** The remote client opens a WebSocket to the channel's home provider at `wss://{homeProviderDomain}/api/ws` (§7.1) — *not* to its own home provider.
 3. **Authenticate.** The client completes the signed-challenge handshake of §7.1 using its device key. Because the actor is remote, the home provider resolves the actor's public keys from the actor's home provider via the keys endpoint (§4.6), then verifies the `authenticate` signature normally. Key caching, rotation, and re-fetch-on-failure follow §4.6.
-4. **Subscribe.** The client sends `subscribe` with the channel id(s). The provider enforces membership + tier at subscription-time (§7.1) and rejects unauthorized subscriptions with an `error` (`code: "forbidden"`). Resume (`since` cursors) and the `ping`/`pong` heartbeat work identically to the local case.
+4. **Subscribe.** The client sends `subscribe` with the channel id(s). The provider enforces membership + tier at subscription-time (§7.1) and rejects unauthorized subscriptions with an `error`: `not_found` for a channel the actor cannot read (§11.3), as for one that does not exist. Resume (`since` cursors) and the `ping`/`pong` heartbeat work identically to the local case.
 
 #### Edit & delete propagation
 
@@ -2396,6 +2420,8 @@ A channel's tier can narrow, but never widen, access granted by its group's tier
 
 Providers **MUST** apply this one rule identically on every surface that exposes channel content or existence: channel listing and `GET` (§5.5), message history and replies (§7.2), live subscription (§7.1, §8.5), follows (§7.6), read markers (§7.7), notifications (§10.1), and discovery-feed items and their `sample` previews (§11.2). A `public` channel inside a `group`- or `private`-tier group is therefore readable by members only.
 
+**Hidden channels answer as missing.** When an actor (or an anonymous viewer, §4.5) may read the group but not the channel — condition 2 or 3 fails — every surface above, and every other request naming the channel or one of its messages (message create, edit and delete, reactions, typing; §7.1), **MUST** answer exactly as for a channel that does not exist: `404` over REST, an `error` with `code` `not_found` over WebSocket (§7.3), and omission from listings, notifications and discovery. Read markers treat it as an unknown scope (§7.7). `403` remains only for an actor who **can** read the channel but lacks a permission for the action (e.g. `post:<type>`, `react` or `manage`, §5.2, §5.2.1).
+
 Access is evaluated continuously, not only at subscription time; see §7.1 *Losing access*.
 
 ---
@@ -2423,6 +2449,8 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Support message edit (author-only, `editUntil`) and tombstone delete (§7.1)
 - [ ] Support single-step media upload at `POST /api/media`, setting `mime`, `size` and `hash`, and `width`, `height` and `durationMs` from the bytes when it can determine them or from the uploader otherwise (§5.8)
 - [ ] Answer `PATCH /api/me/profile` with the updated `UserProfile`, clear the avatar on `"avatar": null`, and reject a non-`https` `avatar` (SHOULD also reject one it does not host) (§6.3)
+- [ ] Serve `GET /api/users/{userRef}/profile`, `…/presence` and `…/groups` to signed and anonymous viewers, evaluating visibility per §6.1 (subject always; `denyList`, then `allowList`, then the setting); answer a viewer not permitted with the uniform `200` responses (base profile, `offline`, empty groups), never `403`, and every non-hosted, unknown, disabled or invalid subject with the same `404`; list only hosted groups the viewer may read (§6.1–§6.5)
+- [ ] Treat `PUT /api/me/presence` as a full replace that rejects `offline` with `400`, and `PUT /api/me/privacy` as a partial update that rejects an actor in both lists, or an over-long list, with `400` (§6.4, §6.6)
 - [ ] Support direct messages: deterministic `dmId` derivation, inbox-only storage (no sender copy), the `{dmId}`/`to` verification on delivery, conversation pointers and `dm.conversation`, conversation listing/reading, and `dm.message` real-time delivery (§7.4)
 - [ ] Support the explicit contacts model (request/accept/remove, local and federated) backing the `contacts` visibility tier (§6.7)
 - [ ] Publish provider signing key(s) in discovery and sign provider-to-provider requests (§8.1)
@@ -2432,6 +2460,8 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Support real-time presence over WebSocket: `presence.subscribe`/`set`, `presence.update` fan-out, connection-derived online/offline, and §6.1 visibility filtering consistent with the REST presence endpoint (§7.5)
 - [ ] Support message fan-out + notification endpoints
 - [ ] Enforce tiers per channel and group, using the single effective-read-access rule (§11.3) on every surface, and end live subscriptions with `unsubscribed` (`reason: "access_revoked"`) when access is lost (§7.1)
+- [ ] Answer a channel the caller may not read, in a group it may read, exactly as a missing channel on every surface (`404` / `not_found`, unknown read-marker scope); `403` only when the caller can read the channel but lacks a permission (§11.3)
+- [ ] Handle an unsigned request to a route that accepts anonymous readers as an anonymous viewer (`public` access only, never `401`), keeping `401` for signed requests that fail §4.5 (§4.5)
 - [ ] Support the `private` tier
 - [ ] Expose `GET /api/tiers` endpoint
 - [ ] Provide metadata schema registry (optional entries allowed)
