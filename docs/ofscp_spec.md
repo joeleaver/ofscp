@@ -72,7 +72,7 @@ A handle **MUST** match `^[a-z0-9_-]{3,32}$`. Providers **MUST** reject (not sil
 To enable evolution without breaking interoperability:
 
 * Clients and providers **MUST** ignore unknown JSON object fields.
-* Clients and providers **MUST** ignore unknown event types. For a provider this covers WebSocket client commands (§7.1) whose `type` is not a standard one: it **MUST** ignore them. A *standard* command it does not support is answered with an `error` instead (§7.1, *WebSocket message types*).
+* Clients and providers **MUST** ignore unknown event types. For a provider this covers WebSocket client commands (§7.1) whose `type` is not a standard one: once the connection is authenticated, it **MUST** ignore them. (Before authentication, any command other than `authenticate` closes the connection with `4001`, §7.1 *Authentication*.) A *standard* command it does not support is answered with an `error` instead (§7.1, *WebSocket message types*).
 * Unknown `message.type` values **MUST** be rendered as a generic “message” using best-effort content display.
 
 ### 2.4. Canonical identifiers
@@ -1362,7 +1362,7 @@ Rules:
 
 * Until authenticated, providers **MUST** ignore (or reject) every command other than `authenticate`, and **MUST** close the connection with `4001` if any other command is received first.
 * Providers **MUST** close the connection with `4001` if no valid `authenticate` arrives within a short window (RECOMMENDED 10 seconds).
-* On authentication failure, providers **MUST** send an `error` event and then close with application close code `4001`. The event's `code` and `status` mirror the answer the same failure would get over REST (§4.5, §4.6, §7.3):
+* On authentication failure, providers **MUST** send an `error` event and then close with application close code `4001`. An `authenticate` whose `data` is malformed is an authentication failure (`unauthorized` / `401`), not a `bad_request` that leaves the connection open. The event's `code` and `status` mirror the answer the same failure would get over REST (§4.5, §4.6, §7.3):
   * `unauthorized` / `401` for a failed check — a bad signature, timestamp or challenge nonce, or no matching key — including a key fetch refused by the outbound-request rules (§8 *Outbound requests*) when no cached key matches.
   * `forbidden` / `403` when federation policy denies the actor's provider (§8 *Authorization*).
   * `service_unavailable` / `503` when the actor's keys could not be fetched — a fetch failure, or a re-fetch suppressed by the provider's own limit — and no cached key matches (§4.5 step 6, §4.6). The provider **SHOULD** include `details.retryAfter` (seconds) when it knows when a retry can succeed.
@@ -1399,7 +1399,7 @@ Clients **MUST** ignore unknown fields.
 
 All WebSocket payloads **MUST** use the message envelope described above.
 
-The `type` field **MUST** be one of the following standardized strings.
+The standard `type` strings are the following; a `type` not listed here is handled per §2.3 and the rules below.
 
 ##### Client → Server command types
 
@@ -1517,7 +1517,7 @@ Authorization is not checked only once. When a change removes a subscribed actor
 
 | Code | Meaning |
 | --- | --- |
-| `4001` | Authentication failed, the actor/provider is refused by federation policy (§8), or the connection's key can no longer be confirmed (§7.1: its cache entry expired without a successful re-fetch). In that last case the key was not revoked, and the client **MAY** reconnect and re-authenticate later. |
+| `4001` | Authentication failed (including the authentication timeout and a command other than `authenticate` received before authentication), the actor/provider is refused by federation policy (§8), or the connection's key can no longer be confirmed (§7.1: its cache entry expired without a successful re-fetch). In that last case the key was not revoked, and the client **MAY** reconnect and re-authenticate later. |
 | `4003` | The connection's credentials were revoked: its device key was revoked (§4.7), or the account it authenticated as no longer exists (e.g. a guest account was claimed or merged, §4.8). The client **MUST NOT** reconnect with the same key. |
 
 A provider **MUST** close every connection authenticated with a device key, with `4003`, when that key is revoked.
@@ -1536,8 +1536,8 @@ For a connection from a **remote** actor, the provider holds the actor's keys un
 * `1000` — heartbeat or idle timeout (*Heartbeat & liveness*).
 * `1001` — provider shutdown or restart.
 * `1008` — a policy violation, such as repeated abuse of the command rate limit.
-* `1009` — a frame over the provider's size limit.
-* `1013` — a per-actor connection cap, or an outbound queue overflow from a slow consumer. The provider first sends an `error` (`too_many_requests`, with `details.retryAfter` in seconds when known).
+* `1009` — a frame over the provider's size limit. Over WebSocket this close replaces the REST `413` (§2.5); the provider **MAY** first send an `error` (`payload_too_large`).
+* `1013` — a per-actor connection cap, or an outbound queue overflow from a slow consumer. The provider first sends an `error` (`too_many_requests`, with `details.retryAfter` in seconds when known). A connection cap is checked once `authenticate` has succeeded: the provider sends that `error` in place of `authenticated`, then closes.
 
 The authentication timeout and a command other than `authenticate` before authentication close with `4001` (*Authentication*).
 
