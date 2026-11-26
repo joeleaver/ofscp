@@ -20,7 +20,10 @@
               "$ref": "../defs/common.json#/$defs/OpaqueCursor",
               "description": "Opaque position of this event in the channel timeline (same cursor space as REST history, §7.2). Clients persist this to resume via subscribe.since."
             },
-            "message": { "$ref": "./message-created.json#/allOf/1/properties/data/properties/message" }
+            "message": {
+              "$ref": "../defs/messaging.json#/$defs/BaseMessage",
+              "description": "The full canonical message after the edit (§5.3, §7.1), with editedAt set."
+            }
           }
         }
       }

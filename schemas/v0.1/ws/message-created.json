@@ -21,17 +21,8 @@
               "description": "Opaque position of this event in the channel timeline (same cursor space as REST history, §7.2). Clients persist this to resume via subscribe.since."
             },
             "message": {
-              "type": "object",
-              "additionalProperties": true,
-              "required": ["id", "author", "createdAt", "content"],
-              "properties": {
-                "id": { "type": "string", "minLength": 1 },
-                "clientMessageId": { "type": "string", "minLength": 1 },
-                "author": { "$ref": "../defs/identity.json#/$defs/UserRef" },
-                "createdAt": { "$ref": "../defs/common.json#/$defs/Rfc3339DateTime" },
-                "editedAt": { "$ref": "../defs/common.json#/$defs/Rfc3339DateTime" },
-                "content": { "$ref": "../defs/messaging.json#/$defs/Content" }
-              }
+              "$ref": "../defs/messaging.json#/$defs/BaseMessage",
+              "description": "The full canonical message (§5.3, §7.1). The author's copy MUST carry clientMessageId when the create carried one."
             }
           }
         }

@@ -1,18 +1,26 @@
 {
   "id": "evt_202",
   "type": "message.updated",
-  "ts": "2026-01-01T12:00:00Z",
+  "ts": "2026-01-01T12:05:00Z",
   "data": {
     "groupId": "grp_1",
     "channelId": "chn_general",
+    "cursor": "opaqueCursorValue",
     "message": {
       "id": "msg_999",
       "author": "jane@a.com",
-      "createdAt": "2026-01-01T12:00:00Z",
+      "type": "memo",
       "content": {
         "mime": "text/plain",
         "text": "edited"
-      }
+      },
+      "attachments": [],
+      "createdAt": "2026-01-01T12:00:00Z",
+      "editedAt": "2026-01-01T12:05:00Z",
+      "permissions": {
+        "editUntil": "2026-01-01T13:00:00Z"
+      },
+      "metadata": []
     }
   }
 }

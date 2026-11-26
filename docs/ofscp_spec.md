@@ -391,6 +391,8 @@ The signature is `base64( Ed25519_sign( privateKey, utf8Bytes(canonicalString) )
 
 #### 4.4.3. Example
 
+A signed request that creates a channel message (`POST …/messages`, §7.1):
+
 ```http
 POST /api/groups/grp_1/channels/chn_general/messages?foo=1
 Host: providera.com
@@ -400,6 +402,9 @@ X-OFSCP-Timestamp: 2026-01-01T12:00:00Z
 X-OFSCP-Nonce: 8wQk2mJ0r5s (base64url, ≥128-bit)
 X-OFSCP-Content-Digest: <base64 sha-256 of body>
 X-OFSCP-Signature: <base64 ed25519 signature>
+Content-Type: application/json
+
+{"content":{"text":"hi","mime":"text/plain"}}
 ```
 
 Canonical string that is signed:
@@ -647,7 +652,7 @@ A channel **MAY** carry an optional `permissions` object that refines the group'
 * **Grant actions** — `view`, `post:message`, `post:memo`, `post:article`, and `react` — use the same **exact-membership** rule as group permissions: an actor is allowed **iff their role is listed** for the action (`owner` is always allowed). There is no rank inheritance. Providers **MAY** define additional channel actions or roles.
 * **Fallback.** When the channel omits an action, the channel inherits the group equivalent: each `post:<type>` falls back to the group's `post` action; `view` falls back to the channel `tier` semantics (§11); `react` falls back to "any actor permitted to read the channel may react" (the v0.1 default). A channel with no `permissions` object therefore behaves exactly as in v0.1 prior to this addition.
 * **`view`.** When present, only members whose role is listed in `view` may read the channel (list messages, subscribe, receive fan-out), **overriding** the channel `tier`. This lets, for example, a `public`-tier group restrict an individual channel to admins. When absent, channel read access follows `tier`.
-* **`post:<type>`.** Gates creation of a message of that `type` (§5.3) in the channel. A `message.create` whose `type` the actor is not permitted to post **MUST** be rejected with `403`.
+* **`post:<type>`.** Gates creation of a message of that `type` (§5.3) in the channel. A create (the `message.create` command or `POST …/messages`, §7.1) whose `type` the actor is not permitted to post **MUST** be rejected with `403`; a create without `type` is a `message`.
 * **`react`.** Gates adding reactions (§7) in the channel.
 * **`replyOnly`** is a **restriction**, not a grant. An actor is *reply-restricted* when their role **is listed** in `replyOnly` — **except `owner`, who is never reply-restricted**. A reply-restricted actor may post **only** when the message carries a `reference` (§5.3) — i.e. it is a reply; a top-level post **MUST** be rejected with `403`. (Example: `"replyOnly": ["member", "guest"]` restricts `member` and `guest`.)
 * **`replyOnlyTo`**, when present, further constrains a reply-restricted actor: the referenced parent message's `type` **MUST** be one of the listed types, otherwise the post is rejected with `403`. This expresses rules such as "guests may only reply to memos or articles".
@@ -1039,7 +1044,13 @@ Single-step upload (**REQUIRED** of all providers). The client uploads the file 
 { "id": "att_1", "mime": "image/png", "url": "https://cdn.a.com/att_1.png", "size": 20480, "filename": "diagram.png", "hash": "sha-256:…", "width": 1024, "height": 768 }
 ```
 
-The returned object is then placed in a message's `attachments`. Providers **MUST** enforce a maximum size and return **`413`** when exceeded; that limit **SHOULD** be advertised as `capabilities.limits.maxUploadBytes` in discovery (§3.1). Providers **SHOULD** populate `hash` so recipients can verify integrity.
+**Dimensions and duration.** `width` and `height` (pixels, for images and video) and `durationMs` (for audio and video) are set once, at upload, and returned in the `Attachment`:
+
+* The provider **SHOULD** set each from the stored bytes when it can determine it (for example, from an image's header).
+* For a value the provider cannot determine, the uploader **MAY** supply it as an extra form part named `width`, `height` or `durationMs` beside `file`, holding a non-negative decimal integer. The provider copies a supplied value into the returned `Attachment` only when it did not determine that value itself. A supplied value that is not a non-negative integer is a **`400`**.
+* A value neither side supplied is omitted. These values are layout hints, and clients **MUST NOT** rely on them being accurate.
+
+The returned object is then placed, unchanged, in a message's `attachments` (§7.1). Providers **MUST** enforce a maximum size and return **`413`** when exceeded; that limit **SHOULD** be advertised as `capabilities.limits.maxUploadBytes` in discovery (§3.1). Providers **SHOULD** populate `hash` so recipients can verify integrity.
 
 #### Pre-signed uploads (Optional)
 
@@ -1103,6 +1114,22 @@ Example request:
   "metadata": []
 }
 ```
+
+All fields are optional; a field that is absent is left unchanged. It is a signed local-account endpoint (remote actors receive `403`).
+
+**Response (`200 OK`):** the caller's updated `UserProfile` (§5.1.1, `user-profile.json`), with `updatedAt` set to the time of the change. Because the caller is its own subject, the response **MAY** also carry the caller's profile extras such as `bio`, as in §6.2. **Errors:** `400` (invalid body, or an `avatar` the provider refuses, below), `401` (§4.5), `403` (remote actor).
+
+**Setting an avatar.** A client sets an avatar in two steps, both at the user's home provider:
+
+1. Upload the image with `POST /api/media` (§5.8), which returns an `Attachment`.
+2. Send `PATCH /api/me/profile` with `{ "avatar": "<the Attachment's url>" }`.
+
+The provider checks the `avatar` URL as follows:
+
+* It **MUST** reject with `400` a value that is not an `https` URL.
+* It **MAY** reject with `400` a URL it does not host itself (one that did not come from its own `POST /api/media`), and **SHOULD** reject with `400` a URL it hosts whose `Attachment` `mime` is not `image/*`.
+* If it fetches a URL it does not host (for example, to check or cache it), that fetch follows the outbound-request rules of §8.
+* An avatar URL it hosts is an attachment URL, so the CORS rules of §3.4 apply to it.
 
 ### 6.4. Presence endpoint
 
@@ -1351,7 +1378,7 @@ The `type` field **MUST** be one of the following standardized strings.
 | `authenticate` | Authenticate the connection. **MUST** be the first command sent (see Authentication above). | `WsAuthenticate` |
 | `subscribe` | Subscribe this connection to one or more channel streams. | `WsSubscribe` |
 | `unsubscribe` | Unsubscribe this connection from one or more channel streams. | `WsUnsubscribe` |
-| `message.create` | Create (post) a message into a channel timeline. | `WsMessageCreate` |
+| `message.create` | Create (post) a message of any type (`message`, `memo`, `article`) into a channel timeline. | `WsMessageCreate` |
 | `message.update` | Edit an existing message (author-only, within `editUntil`). | `WsMessageUpdate` |
 | `message.delete` | Delete (tombstone) a message. | `WsMessageDelete` |
 | `reaction.add` | Add a reaction to a message. | `WsReactionAdd` |
@@ -1372,13 +1399,13 @@ The `type` field **MUST** be one of the following standardized strings.
 | `authenticated` | Acknowledgement of a successful `authenticate`. | `WsAuthenticated` |
 | `subscribed` | Acknowledgement of a successful `subscribe`. | `WsSubscribed` |
 | `unsubscribed` | Acknowledgement of a successful `unsubscribe`, or an unsolicited notice that access was lost (`reason`, see *Losing access*). | `WsUnsubscribed` |
-| `message.created` | A message was created in a subscribed channel. | `WsMessageCreated` |
-| `message.updated` | A message was updated in a subscribed channel. | `WsMessageUpdated` |
+| `message.created` | A message was created in a subscribed channel; carries the full `Message`. | `WsMessageCreated` |
+| `message.updated` | A message was updated in a subscribed channel; carries the full `Message`. | `WsMessageUpdated` |
 | `message.deleted` | A message was deleted in a subscribed channel. | `WsMessageDeleted` |
 | `reaction.added` | A reaction was added to a message. | `WsReactionAdded` |
 | `reaction.removed` | A reaction was removed from a message. | `WsReactionRemoved` |
 | `channel.typing` | Typing indicator event for a channel. | `WsChannelTyping` |
-| `dm.message` | A direct message was delivered to your inbox (§7.4). | `WsDmMessage` |
+| `dm.message` | A direct message was delivered to your inbox, or edited or deleted there (§7.4); carries the full `Message`. | `WsDmMessage` |
 | `dm.conversation` | One of your own conversations was created or updated by a send from any of your devices (§7.4). | `WsDmConversation` |
 | `presence.subscribed` | Acknowledgement of a successful `presence.subscribe`. | `WsPresenceSubscribed` |
 | `presence.unsubscribed` | Acknowledgement of a successful `presence.unsubscribe`. | `WsPresenceUnsubscribed` |
@@ -1487,7 +1514,19 @@ If the gap exceeds what the provider will replay, the provider **MUST** signal t
 
 #### Sending messages
 
-Posting a message is a WebSocket command.
+Posting a message is the `message.create` WebSocket command, or its REST equivalent below. Both create a message of any `type` (`message`, `memo` or `article`, §5.3) and take the same body (`MessageCreate`, in `defs/messaging.json`):
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `content` | yes | The message body (§5.3). |
+| `clientMessageId` | no (**SHOULD** be set) | Client-chosen idempotency key (below). |
+| `type` | no | `message`, `memo` or `article`; omitted means `message`. |
+| `attachments` | no | `Attachment` objects as returned by `POST /api/media` (§5.8); omitted means `[]`. |
+| `reference` | no | Makes the message a reply (§7.2): `{ "type": "reply", "id": "<parent id>" }`. |
+| `tags` | no | An array of strings, as on `BaseMessage` (§5.3). |
+| `metadata` | no | Metadata objects (§5.4); omitted means `[]`. |
+
+Over WebSocket the body is the command's `data`, which also carries `groupId` and `channelId` (`ws/message-create.json`). Over REST those two are in the path (`message-create-request.json`).
 
 Client → Server:
 ```json
@@ -1503,7 +1542,7 @@ Client → Server:
 }
 ```
 
-Server → Client event (fan-out to all subscribed clients, including the author):
+Server → Client event (fan-out to all subscribed clients, including the author; the requesting connection's copy carries the command's `id` in `correlationId`):
 ```json
 {
   "id": "evt_201",
@@ -1513,25 +1552,59 @@ Server → Client event (fan-out to all subscribed clients, including the author
   "data": {
     "groupId": "grp_1",
     "channelId": "chn_general",
+    "cursor": "opaqueCursorValue",
     "message": {
       "id": "msg_999",
       "clientMessageId": "cmsg_abc123",
       "author": "alice@a.com",
+      "type": "message",
+      "content": { "mime": "text/plain", "text": "hi" },
+      "attachments": [],
       "createdAt": "2026-01-01T12:00:00Z",
-      "content": { "mime": "text/plain", "text": "hi" }
+      "permissions": { "editUntil": "2026-01-01T13:00:00Z" },
+      "metadata": []
     }
   }
 }
 ```
 
+A memo with an image, then a reply to it, are created the same way:
+```json
+{ "id": "cli_201", "type": "message.create", "data": { "groupId": "grp_1", "channelId": "chn_general", "clientMessageId": "cmsg_abc124", "type": "memo", "content": { "mime": "text/plain", "text": "Our new logo" }, "attachments": [ { "id": "att_1", "mime": "image/png", "url": "https://cdn.a.com/att_1.png", "size": 20480, "width": 1024, "height": 768 } ], "tags": ["#design"] } }
+{ "id": "cli_202", "type": "message.create", "data": { "groupId": "grp_1", "channelId": "chn_general", "clientMessageId": "cmsg_abc125", "content": { "mime": "text/plain", "text": "Love it" }, "reference": { "type": "reply", "id": "msg_1000" } } }
+```
+
+Rules (both transports):
+
+* The provider sets `id`, `author` (the authenticated actor), `createdAt` and `permissions`, and stores `type`, `content`, `attachments`, `reference`, `tags` and `metadata` as given, with the defaults above. The stored message is a `BaseMessage` (§5.3).
+* The provider **MUST** reject with **`400`** (`bad_request`) a body that does not match the schema, an unknown `type`, an invalid `Attachment` or metadata object, or a `reference` of type `reply` whose `id` is not a message in the same channel (§7.2).
+* The provider **MUST** reject with **`403`** (`forbidden`) a create the actor may not make: one whose `type` the channel's `post:<type>` permission does not grant (§5.2.1), or one that breaks `replyOnly` / `replyOnlyTo` (§5.2.1).
+* Over WebSocket, a rejection is an `error` event (§7.3) with the command's `id` in `correlationId`.
+
 Idempotency:
 
 * Clients **SHOULD** set `clientMessageId`.
-* Providers **MUST** treat `(author, channelId, clientMessageId)` as idempotent and respond with the canonical message if a duplicate is received.
+* Providers **MUST** treat `(author, channelId, clientMessageId)` as idempotent. A create whose key matches an existing message creates nothing and fans out nothing: the provider returns the existing message as it now stands, whatever the rest of the body says. This happens after the checks above, so a duplicate the actor may no longer post is still rejected.
+* Over WebSocket the existing message goes only to the requesting connection, as a `message.created` with the command's `id` in `correlationId`.
+* When the create carried a `clientMessageId`, the provider **MUST** include it in the message on the author's copies of `message.created` (on every connection of the author's that receives the event) and in the response to the create, first or duplicate. A provider **MAY** include it in other copies and in history.
+
+**REST equivalent** (for non-WS clients):
+
+```http
+POST /api/groups/{groupId}/channels/{channelId}/messages
+X-OFSCP-Signature: <signed per §4.4>
+Content-Type: application/json
+
+{ "clientMessageId": "cmsg_def456", "content": { "mime": "text/plain", "text": "Welcome aboard!" }, "reference": { "type": "reply", "id": "msg_999" } }
+```
+
+The body is `MessageCreate` (`message-create-request.json`), and the rules above apply. (The §4.4.3 signing example and `tests/signing-vector.json` sign such a request; an unknown query parameter, like its `foo=1`, is ignored.) On success the provider fans out `message.created` to the channel's subscribers, as for the WebSocket command; that event has no `correlationId`, since no WebSocket command caused it.
+
+**Response (`201 Created`):** the created `Message`. **Response (`200 OK`):** the existing `Message`, when the `clientMessageId` matches one already created (idempotent). **Errors:** `400` (invalid body, as above), `401` (§4.5), `403` (not permitted, as above), `404` (no such group or channel, or one not visible to the caller, §7.3), `413` (body over the provider's size limit), `429`.
 
 #### Editing & deleting messages
 
-**Editing** replaces a message's `content`. Only the **author** may edit, and only while `permissions.editUntil` (§5.3) is in the future; otherwise the provider **MUST** reject with `403`. A successful edit sets `editedAt` on the message and fans out `message.updated` to subscribers.
+**Editing** replaces a message's `content`. Only the **author** may edit, and only while `permissions.editUntil` (§5.3) is in the future; otherwise the provider **MUST** reject with `403`. A successful edit sets `editedAt` on the message and fans out `message.updated` to subscribers, carrying the full updated `Message` (§5.3), as `message.created` does.
 
 Client → Server:
 ```json
@@ -1742,8 +1815,9 @@ This is the single send path whether the recipient is remote or local to the sen
 * authenticates the signer as the message author (§4.5);
 * identifies the recipient. Clients **SHOULD** name it in `to`; the provider then **MUST** check that `to` is one of its local users and that `{dmId}` equals the id derived from `{author, to}`. Without `to`, the recipient is the **local** user `u` for which `{dmId}` equals the id derived from `{author, u}` (§2.2: `u` is `handle@`*this provider's authority*); because the `dmId` is a one-way hash, the provider finds `u` by deriving the id for its local users (it **MAY** maintain an index of previously seen `(dmId → user)` pairs);
 * **MUST** reject with **`400`** if `to` fails those checks, or (without `to`) no local user matches — this prevents writing into a conversation the author is not part of (inbox poisoning);
-* applies `(author, dmId, clientMessageId)` idempotency (§7.1), stores the message in the recipient's inbox, and emits `dm.message` to the recipient's subscribers;
-* if the author is **also a local user** (both participants on this provider), records the author's conversation pointer itself and emits `dm.conversation` to the author (below).
+* applies `(author, dmId, clientMessageId)` idempotency (§7.1), stores the message in the recipient's inbox, and emits `dm.message` to the recipient's subscribers. The stored message has `type` `message`, since the v0.1 DM body carries no `type`;
+* if the author is **also a local user** (both participants on this provider), records the author's conversation pointer itself and emits `dm.conversation` to the author (below);
+* answers **`201 Created`** with the stored `Message`, or **`200 OK`** with the existing `Message` for a duplicate `clientMessageId`. Either response **MUST** include the `clientMessageId`.
 
 #### Conversation pointers (Normative)
 
@@ -1794,12 +1868,12 @@ When a DM is delivered to the user's inbox, the provider emits `dm.message`:
   "data": {
     "dmId": "dm_c2a3a0d4bc7aa54700d2f412c42fc0155df6071e502977e4988933eef7e46868",
     "cursor": "opaqueCursorValue",
-    "message": { "id": "msg_77", "author": "alice@a.com", "createdAt": "2026-01-05T18:42:00Z", "content": { "mime": "text/plain", "text": "hey, are we still on for tomorrow?" } }
+    "message": { "id": "msg_77", "clientMessageId": "cmsg_dm_001", "author": "alice@a.com", "type": "message", "content": { "mime": "text/plain", "text": "hey, are we still on for tomorrow?" }, "attachments": [], "createdAt": "2026-01-05T18:42:00Z", "permissions": { "editUntil": "2026-01-05T19:42:00Z" }, "metadata": [] }
   }
 }
 ```
 
-Only the recipient receives `dm.message`, since only their inbox stores the message. Editing and deleting DMs follow the same author/tombstone rules as §7.1, applied against the recipient's stored copy.
+`data.message` is the full canonical `Message` (§5.3), the same object that `GET /api/dms/{dmId}/messages` returns, and **MAY** carry `clientMessageId`. Only the recipient receives `dm.message`, since only their inbox stores the message. Editing and deleting DMs follow the same author/tombstone rules as §7.1, applied against the recipient's stored copy.
 
 **Edits and deletes are re-sent as `dm.message`.** There is no separate DM update event: after an edit or delete, the provider emits `dm.message` again with the same `message.id`, carrying the updated `Message` (with `editedAt` set after an edit; with `deletedAt` set and `content` cleared after a delete). Clients **MUST** treat a `dm.message` whose `message.id` they already hold as a replacement of that message, not a new one.
 
@@ -2329,7 +2403,12 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Reject a keys response whose `actor` is not the requested actor, and a discovery document whose `provider.domain` is not the authority it was fetched from (§3.1, §4.6); answer `403` for a denied signer and `401` when the outbound-request rules forbid the fetch (§4.6, §8)
 - [ ] Support group and channel management (create/read/update/delete) with the permission model (§5.5)
 - [ ] Support group membership: join/leave, member listing, roles, per-group nicknames, `member.updated`, and the `request` approval flow (§5.7)
+- [ ] Support message creation of every type (`message`, `memo`, `article`) with `attachments`, `reference`, `tags` and `metadata`, over both `message.create` and `POST …/messages`, gated by `post:<type>` and `replyOnly` (§5.2.1, §7.1)
+- [ ] Treat `(author, channelId, clientMessageId)` as idempotent, returning the existing message on a duplicate, and echo `clientMessageId` on the author's `message.created` and on every create response (§7.1, §7.4)
+- [ ] Carry the full canonical `Message` in `message.created`, `message.updated` and `dm.message` (§7.1, §7.4)
 - [ ] Support message edit (author-only, `editUntil`) and tombstone delete (§7.1)
+- [ ] Support single-step media upload at `POST /api/media`, setting `mime`, `size` and `hash`, and `width`, `height` and `durationMs` from the bytes when it can determine them or from the uploader otherwise (§5.8)
+- [ ] Answer `PATCH /api/me/profile` with the updated `UserProfile`, and reject a non-`https` `avatar` (§6.3)
 - [ ] Support direct messages: deterministic `dmId` derivation, inbox-only storage (no sender copy), the `{dmId}`/`to` verification on delivery, conversation pointers and `dm.conversation`, conversation listing/reading, and `dm.message` real-time delivery (§7.4)
 - [ ] Support the explicit contacts model (request/accept/remove, local and federated) backing the `contacts` visibility tier (§6.7)
 - [ ] Publish provider signing key(s) in discovery and sign provider-to-provider requests (§8.1)
@@ -2361,6 +2440,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] For remote channels, open the real-time WebSocket to the channel's home provider (not the user's own) and complete the §7.1 handshake there (§8.5)
 - [ ] Compose the home feed client-side by reading each followed channel live from its source (§7.6); do not rely on a server-compiled feed
 - [ ] Support all message types or graceful fallback
+- [ ] Set an avatar by uploading it to the home provider (`POST /api/media`) and then sending its `url` in `PATCH /api/me/profile` (§6.3)
 
 ### Client **SHOULD**
 

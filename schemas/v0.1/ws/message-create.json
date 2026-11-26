@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/ofscp/schemas/v0.1/ws/message-create.json",
   "title": "OFSCP WS message.create command (v0.1)",
+  "description": "Creates a message of any type (§7.1). data is the MessageCreate body (shared with POST /api/groups/{groupId}/channels/{channelId}/messages) plus groupId and channelId.",
   "allOf": [
     { "$ref": "./envelope.json" },
     {
@@ -10,15 +11,17 @@
       "properties": {
         "type": { "const": "message.create" },
         "data": {
-          "type": "object",
-          "additionalProperties": true,
-          "required": ["groupId", "channelId", "content"],
-          "properties": {
-            "groupId": { "type": "string", "minLength": 1 },
-            "channelId": { "type": "string", "minLength": 1 },
-            "clientMessageId": { "type": "string", "minLength": 1 },
-            "content": { "$ref": "../defs/messaging.json#/$defs/Content" }
-          }
+          "allOf": [
+            { "$ref": "../defs/messaging.json#/$defs/MessageCreate" },
+            {
+              "type": "object",
+              "required": ["groupId", "channelId"],
+              "properties": {
+                "groupId": { "type": "string", "minLength": 1 },
+                "channelId": { "type": "string", "minLength": 1 }
+              }
+            }
+          ]
         }
       }
     }
