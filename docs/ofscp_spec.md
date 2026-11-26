@@ -52,7 +52,7 @@ OFSCP uses exactly three identifier forms. Each has a defined place; implementat
 
 * **Actor** — `handle@domain`, identifying a user anywhere in the network. `domain` is the user's home provider authority, lowercased, with `:port` only if non-default (as `<authority>` in §4.4.2), with no trailing dot, and with internationalized names in their ASCII (`xn--`) form. This spelling is the actor's **canonical form**. Senders **MUST** send actors in canonical form. A receiver **MUST**, for every actor it receives — the `X-OFSCP-Actor` header, the WebSocket `authenticate` actor, and every user-valued field in a body — either reject a non-canonical spelling (`401` for the header; for the WebSocket `authenticate` actor, an `error` event then close `4001`, §7.1; `400` for a body) or convert it to canonical form **before** any comparison, lookup, hashing (e.g. `dmId`, §7.4), authorization decision (including allow/deny and privacy lists) or storage. Two spellings of one actor are never two actors. Where the spec says a field **MUST** be canonical (e.g. §7.4 `with`), rejection is required. (The `UserRef` schema pattern is looser than this rule; the prose governs.)
 
-The same domain rule defines a **canonical authority** for providers. A provider **MUST** reject, or convert to canonical form, every provider authority it receives or stores — `X-OFSCP-Provider` (§8.1), the host of any object URI (§2.2: follows, refs), notification `target`s (§10), push endpoints, and known-provider entries (§8.6) — **before** any allow/deny check (§8) or any outbound request to it. Two spellings of one provider are never two providers. `handle` follows §2.2.1. Actors are used for every user-valued field (`author`, `owner`, `user`, `from`/`to`, `participants`, `X-OFSCP-Actor`, …).
+The same domain rule defines a **canonical authority** for providers. A provider **MUST** reject, or convert to canonical form, every provider authority it receives or stores — `X-OFSCP-Provider` (§8.1), the host of any object URI (§2.2: follows, refs), notification `target`s (§10), upload `target`s (§5.8), push endpoints, and known-provider entries (§8.6) — **before** any allow/deny check (§8) or any outbound request to it. Two spellings of one provider are never two providers. `handle` follows §2.2.1. Actors are used for every user-valued field (`author`, `owner`, `user`, `from`/`to`, `participants`, `X-OFSCP-Actor`, …).
 * **Local id** — the opaque `id` a provider assigns to an object it hosts (group, channel, message, reaction, invite, attachment, join request, …). Local ids are unique **within the issuing provider** only. They appear in that provider's URL paths (e.g. `/api/groups/{groupId}`) and in its payloads. A local id is meaningful only in the context of the provider that issued it; clients **MUST** remember which provider an object came from. Local ids **MUST** match `^[A-Za-z0-9_-]{1,128}$` so they are path-safe without escaping (a short type prefix such as `grp_`, `chn_`, `msg_` is RECOMMENDED but not required).
 * **Object URI** — an absolute HTTPS URL that names an object **across** providers. Object URIs are used wherever a reference may point at another provider (e.g. a follow's `channel`, §7.6; a user's group list, §6.5). The canonical object URIs are:
   * user: `https://{domain}/api/users/{handle}`
@@ -84,8 +84,9 @@ Ids are stable for the lifetime of the object and **MUST NOT** be reused for a d
 ### 2.5. Canonical data formats
 
 * Timestamps **MUST** be RFC 3339 / ISO-8601 strings with timezone (UTC recommended), e.g. `2025-03-01T12:00:00Z`.
-* `mime` values **MUST** be valid IANA media types.
+* `mime` values **MUST** be valid IANA media types. A message's `content.mime` is further limited by the content baseline of §5.3 (*Content formats*).
 * Pagination cursors **MUST** be treated as opaque strings.
+* **base64** in this specification means the standard alphabet of RFC 4648 §4 **with** `=` padding, unless a field says **base64url** (RFC 4648 §5).
 * Field names are **camelCase**, with one deliberate exception: the authentication and key payloads of §4 — the bootstrap response (`bootstrap_token`, `token_type`, `expires_in`), device-key registration and listing (`public_key`, `algorithm`, `device_name`, `key_id`, `created_at`), the keys endpoint (`cache_until`), and `provider.publicKeys` entries in discovery — use **snake_case**, matching OAuth conventions. Implementations **MUST** use the names exactly as specified and **MUST NOT** rely on peers accepting the other casing. (The WebSocket `authenticate` command, §7.1, is camelCase: `keyId`.)
 
 Providers **SHOULD** define maximum payload sizes (request and response) and return **413** when exceeded.
@@ -201,7 +202,7 @@ Likewise, providers **MUST NOT** reject a WebSocket upgrade (§7.1) because of i
 
 * every request whose method and path match an endpoint this specification defines (§3.2), with each `{…}` placeholder matching exactly one non-empty path segment — whatever the provider serves there, so `GET /api/groups/export` matches `GET /api/groups/{groupId}` and is in scope. A preflight is judged by its path and its `Access-Control-Request-Method`: a preflight is in scope if that method and path match an endpoint this specification defines;
 * every `/.well-known/ofscp…` document;
-* every URL this specification has a browser client fetch or send to programmatically, wherever the provider hosts it (including a CDN or object store it uses): attachment `url`s (§5.8, whose `hash` a client may verify) and a pre-signed `uploadUrl` (§5.8). For these URLs the header lists above are replaced by what the flow needs: responses **MUST** carry `Access-Control-Allow-Origin: *` without `Access-Control-Allow-Credentials`, and the preflight for an `uploadUrl` **MUST** allow `PUT` and every request header the upload requires (at least `content-type`, plus any the storage service demands). The `X-OFSCP-*` headers are not required there, since these requests are not signed.
+* every URL this specification has a browser client fetch or send to programmatically, wherever the provider hosts it (including a CDN or object store it uses): attachment `url`s, including a `thumbnail`'s (§5.8, whose `hash` a client may verify) and a pre-signed `uploadUrl` (§5.8). For these URLs the header lists above are replaced by what the flow needs: responses **MUST** carry `Access-Control-Allow-Origin: *` without `Access-Control-Allow-Credentials`, and the preflight for an `uploadUrl` **MUST** allow `PUT` and every request header the upload requires (at least `content-type`, plus any the storage service demands). The `X-OFSCP-*` headers are not required there, since these requests are not signed.
 
 They do not extend to a provider's own non-standard endpoints (§3.2) that match none of the above, even ones under `/api/`. A provider **MAY** serve those without CORS headers, and **SHOULD NOT** allow cross-origin access to any of them that relies on ambient authority — cookies, HTTP authentication, TLS client certificates, or the caller's network position (e.g. an IP allow-list or a loopback-only listener) — for example a cookie-authenticated administration API, because the premise above, that no credential is ambient, does not hold for them. If it does allow cross-origin access to such an endpoint, it **MUST NOT** send `Access-Control-Allow-Credentials` with it. A provider **SHOULD** keep its non-standard endpoints under a path prefix that matches no standard endpoint (e.g. `/api/admin/…`), since a request that matches one is in scope whatever it does. (CORS is not CSRF protection; an ambient-credential endpoint needs its own, such as `SameSite` cookies and a CSRF token.)
 
@@ -337,7 +338,7 @@ Upon successful registration or login, the client registers a device key. **All 
 Providers MUST store for each device key:
 - `key_id`: Unique identifier (provider-generated)
 - `user_handle`: Associated user handle
-- `public_key`: Ed25519 public key (base64)
+- `public_key`: Ed25519 public key: the **raw 32-byte** public key of RFC 8032 (not a DER `SubjectPublicKeyInfo`, RFC 8410), base64-encoded (§2.5), so exactly 44 characters. This one encoding is used everywhere a `public_key` appears — device-key registration (§4.3.1), guest creation (§4.8), device-key listing, the keys endpoint (§4.6) and `provider.publicKeys` in discovery (§3.1). A provider **MUST** reject with `400` a registration whose `public_key` does not decode to exactly 32 bytes; a verifier **MUST** treat a published key that does not as unusable (no request verifies against it).
 - `algorithm`: Key algorithm (see §4.3.3)
 - `device_name`: Human-readable device description
 - `created_at`: Registration timestamp
@@ -732,15 +733,18 @@ Memos are intended to be short-form posts similar to many social media platforms
 
 **Article**
 
-Articles are intended to be long-form posts similar to what you might find on a blog or forum. They can be formatted with html or markdown, and are allowed to embed images or other remote content.
+Articles are intended to be long-form posts similar to what you might find on a blog or forum. Their body is usually `text/markdown`, and can place the message's own attachments inline (*Inline attachments*, below). Like every message body, an article follows the content baseline below; clients **SHOULD NOT** load remote content it names automatically.
 
 ```json
 {
   "id": "msg_3",
   "author": "jane@a.com",
   "type": "article",
+  "title": "Welcome to the guild",
+  "summary": "Who we are, how the channels work, and where to start.",
+  "cover": "att_1",
   "content": {
-    "text": "# Welcome to...",
+    "text": "We started this group to...\n\n![The first meetup](attachment:att_2)\n\nThanks to @bob@b.com for the photos.",
     "mime": "text/markdown"
   },
   "attachments": [
@@ -749,20 +753,36 @@ Articles are intended to be long-form posts similar to what you might find on a 
       "mime": "image/png",
       "url": "https://cdn...",
       "size": 2048
+    },
+    {
+      "id": "att_2",
+      "mime": "image/jpeg",
+      "url": "https://cdn...",
+      "size": 40960
     }
   ],
-  "reference": {
-    "type": "reply",
-    "id": "msg_parent"
-  },
+  "mentions": ["bob@b.com"],
   "tags": ["#intro"],
   "createdAt": "2025-03-01T12:00:00Z",
-  "permissions": {
-    "editUntil": "2025-03-01T13:00:00Z"
-  },
   "metadata": []
 }
 ```
+
+This article has no `permissions.editUntil`, so its author may edit it at any time (§7.1).
+
+**Article fields.** An article **MAY** carry three optional fields:
+
+* `title`: the article's title, as plain text (not interpreted as Markdown or HTML).
+* `summary`: a short plain-text description for lists, cards and previews.
+* `cover`: the `id` of one of the message's own `attachments`, shown as the article's cover image. The cover **SHOULD** be an `image/*` attachment.
+
+Rules:
+
+* A provider **MUST** reject with **`400`** a create or edit (§7.1) that leaves an article with a `cover` that is not the `id` of an entry in its `attachments`, or a `title` or `summary` that is not a string. It **MAY** limit their length and reject a longer value with `400`.
+* These fields are defined only for `type` `article`. On any other type a provider **MUST** ignore them: it neither stores nor returns them (as it ignores `type` on a DM, §7.4).
+* When `title` is absent, a client **MUST** take the article's title from its body when the body's **first block** is a level-1 heading: in `text/markdown` an ATX heading (`# Title`) or a Setext heading (`Title` underlined with `===`), in `text/html` an `<h1>` element. A level-1 heading that is not the first block is not a title. The heading stays in the body: a renderer **MAY** hide it when it shows the title separately. When `title` is present, clients show it above the body, and the body **SHOULD NOT** repeat it as a heading.
+* When `summary` is absent, a client **MAY** derive one from the body (for example, its first paragraph as plain text).
+* A client shows the `cover` attachment as the article's cover, in lists and above the body. When `cover` is absent, the article has no cover; clients **MAY** use the first `image/*` attachment instead.
 
 **Reaction**
 
@@ -785,6 +805,29 @@ Clients **SHOULD** format reactions within their associated messages.
   "metadata": []
 }
 ```
+
+**Content formats.** Every message body (`content`, of any `type`, in channels and in DMs) uses one of these `mime` values:
+
+* `text/plain`: shown as is. Clients **MAY** turn bare `http`/`https` URLs into links.
+* `text/markdown`: [CommonMark](https://spec.commonmark.org/). Renderers **MAY** also support the GitHub Flavored Markdown tables, strikethrough and autolink extensions; a renderer without them shows that syntax as text. **Raw HTML in Markdown (HTML blocks and inline HTML) is shown as literal text**: renderers **MUST NOT** interpret it.
+* `text/html`: **OPTIONAL**. A client that renders it **MUST** first pass it through an allow-list sanitizer that keeps only these elements: `p`, `br`, `hr`, `h1`–`h6`, `strong`, `b`, `em`, `i`, `u`, `s`, `del`, `sub`, `sup`, `code`, `pre`, `blockquote`, `ul`, `ol`, `li`, `a`, `img`, `table`, `thead`, `tbody`, `tr`, `th`, `td`, `span`. It keeps only the attributes `href` on `a`, `alt` and `data-attachment` on `img`, and `colspan`/`rowspan` on `th` and `td`. It removes every other element (keeping its text, except for `script`, `style`, `iframe`, `object`, `embed`, `template` and `noscript`, which it removes with their contents) and every other attribute (including `src`, `style`, `class`, `id` and all `on*` handlers). A client that does not render `text/html` shows its text with the tags removed, never the HTML interpreted.
+
+Providers **MUST** accept `text/plain` and `text/markdown` bodies for every message type. A provider **MAY** reject any other `content.mime` with `400`. A client that receives a body whose `mime` it does not support **SHOULD** show its `text` as `text/plain`.
+
+In every format:
+
+* Clients **MUST NOT** make a link active unless its scheme is `http`, `https` or `mailto` (or `attachment`, below). Other links are shown as text.
+* Clients **SHOULD NOT** load any remote resource the body names, such as a Markdown image `![alt](https://…)`, without a user action, because loading it tells that host who read the message and when. They show such an image as a link (with its alt text) instead. This does not apply to the message's own `attachments` when its author is a local user of the provider that holds the message: that provider hosts them and has checked them (§5.8), and clients **MAY** load them automatically. Attachments of an author on another provider are hosted wherever that author's home provider chose, and loading them tells that host who read the message and when; clients **SHOULD NOT** load them without a user action (a user setting that allows it counts as one), and show them as file links or placeholders until then.
+
+**Inline attachments.** A body places one of the message's own attachments at a point in the text by naming its `id` with an `attachment:` reference:
+
+* `text/markdown`: the image syntax `![caption](attachment:<id>)` shows the attachment at that point, and the link syntax `[text](attachment:<id>)` links to it.
+* `text/html`: `<img data-attachment="<id>" alt="caption">` shows the attachment at that point. A sanitizer keeps `data-attachment` and drops any `src`.
+* `text/plain` has no inline references.
+
+The client resolves `<id>` against the same message's `attachments` and shows the attachment by its `mime`: an image inline, audio or video as a player (with its `thumbnail` as the poster, §5.8), anything else as a file link. An `attachment:` reference never names a URL: a reference whose `<id>` is not in the message's `attachments` is shown as its caption or link text only, and nothing is fetched. Attachments the body does not reference, other than an article's `cover`, are shown after the body, in `attachments` order. Providers do not interpret `attachment:` references and **MUST NOT** reject a body because of them.
+
+**Mentions.** A message **MAY** carry `mentions`, an array of actors (§2.2) the message mentions. The author's client sets it, normally to the users its text names as `@handle` or `@handle@domain`. When present, it is the message's authoritative list of mentions: §10.1 uses it instead of parsing the text, and clients **SHOULD** show as mentions the `@…` references in the text that match it. When absent, mentions are parsed from the text (§10.1). A provider **MUST** apply §2.2 to every entry (reject with `400`, or convert to canonical form) and **MAY** limit the list's length (`400` beyond it). Clients **SHOULD** list only users the text names, so that a message does not notify people who cannot see why.
 
 ### 5.4. Metadata Objects
 
@@ -852,9 +895,12 @@ Fetches metadata for a single group.
   },
   "createdAt": "2024-01-15T10:30:00Z",
   "updatedAt": "2024-01-15T10:30:00Z",
-  "metadata": []
+  "metadata": [],
+  "membership": { "role": "member", "joinedAt": "2024-02-01T09:00:00Z" }
 }
 ```
+
+**The caller's membership.** When the request is signed and the caller is a member of the group (local or remote), the provider **SHOULD** include `membership`: the caller's own `role` and `joinedAt`, and its `displayNameOverride` if set (§5.7). It is authoritative, unlike the role hint in a membership pointer (§5.7, *My groups*). The provider **MUST NOT** include `membership` in an answer to an unsigned request or to a caller who is not a member. Because the answer then depends on the caller, it **MUST NOT** be marked publicly cacheable (send `Cache-Control: private` or `no-store`). A client **MUST NOT** treat an absent `membership` as proof that the caller is not a member, since a provider may not send it; it can list the members (§5.7) instead.
 
 **Errors:**
 - `404 Not Found`: Group does not exist
@@ -1034,17 +1080,62 @@ Whenever a member's `displayNameOverride` or `role` changes, the provider emits 
 * `POST /api/groups/{groupId}/requests/{requestId}/approve` — approve; creates the membership. **Response (`200 OK`):** the new `Member`.
 * `POST /api/groups/{groupId}/requests/{requestId}/deny` — deny. **Response:** `204 No Content`.
 
+#### My groups: membership pointers at home
+
+A user joins a remote group by signing directly to the group's provider (§8.2), so their home provider does not learn of it. So that every device of the user can find all of their groups, the home provider keeps the user's **group list**: its own memberships, plus **membership pointers** the user's client records for groups on other providers. Like a follow (§7.6) or a conversation pointer (§7.4), a pointer is a reference only; the group's provider stays the authority on membership and role.
+
+An entry in the list is a `GroupPointer` (`group-pointer.json`):
+
+```json
+{ "group": "https://b.com/api/groups/grp_9", "role": "member", "updatedAt": "2026-02-01T10:00:00Z" }
+```
+
+* `group` is the group's object URI (§2.2), `https://{authority}/api/groups/{groupId}`, with the authority in canonical form, including for groups the home provider hosts.
+* `role` is, for a group the home provider hosts, the user's current role. For a remote group it is the hint the client last recorded, which **MAY** be stale or absent; the authoritative role is `membership` on `GET /api/groups/{groupId}` at the group's provider (§5.5).
+* `updatedAt` is when the entry last changed.
+
+Endpoints (signed local-account endpoints; remote actors receive `403`):
+
+* `GET /api/me/groups`: returns `{ "groups": [ GroupPointer ], "metadata": [] }` (`group-pointers-response.json`). It **MUST** list every group the provider hosts of which the caller is a member, and every pointer the caller has recorded.
+* `PUT /api/me/groups/{groupRef}`: records or updates a pointer. `{groupRef}` is a group object URI, percent-encoded as one path segment (§2.2, as for `{userRef}`). The optional body is `{ "role": "<role>" }` (`group-pointer-request.json`); the role is stored as a hint. The provider:
+  * **MUST** reject with **`400`**, and record nothing, a `{groupRef}` that is not a group object URI, or a `role` that is not a string;
+  * **MUST** convert the URI's authority to canonical form (§2.2) before storing or comparing it;
+  * after the `400` checks, **MUST** apply its federation allow/deny policy (§8 *Authorization*) to the group's provider, rejecting with **`403`** if federation with it is not permitted, as for conversation pointers (§7.4);
+  * **MUST NOT** store a pointer for a group it hosts itself, since its own membership records are authoritative. For such a group it answers `200` with the entry derived from the caller's membership, or **`404`** if the caller is not a member;
+  * **MUST NOT** contact the group's provider to check the pointer. (A pointer the client records wrongly misleads only the caller's own list.)
+  * answers **`200 OK`** with the stored `GroupPointer`. The PUT is idempotent.
+* `DELETE /api/me/groups/{groupRef}`: removes the caller's pointer. **`204 No Content`**, also when there was none. A group the provider hosts cannot be removed this way: if the caller is a member it answers **`409`** (the caller leaves with `POST /api/groups/{groupId}/leave`), otherwise `204`.
+
+Clients:
+
+* After joining a remote group (a `201` or `200` `Member` from §5.7 `join`, §5.6 `redeem` or §8.2), the client **SHOULD** `PUT` its pointer at its home provider. A join that is still pending (`202`) is recorded once it is approved, which the client learns by reading the group.
+* After leaving a remote group, or on learning it was removed from one (the group's provider answers `403` or `404` to `GET /api/groups/{groupId}`, or no longer lists the user among the group's members, §5.7), the client **SHOULD** `DELETE` the pointer. A `404` from one channel, or an `unsubscribed` with `access_revoked`, is **not** such a signal: it can mean only that the user lost access to that channel (§11.3, §7.1). It **MAY** update the `role` hint when it sees the role change (for example in `member.updated`).
+
+**`groups.updated` event.** Whenever the caller's group list changes — a pointer is recorded, changed or removed by any of their devices, or a membership the provider hosts is created, changes role, or ends (leave, removal, or the group is deleted) — the provider emits `groups.updated` to **all** of the user's connections, with no subscription needed (as for `dm.conversation`, §7.4):
+
+```json
+{ "id": "evt_710", "type": "groups.updated", "ts": "2026-02-01T10:00:00Z", "data": { "groups": [ { "group": "https://b.com/api/groups/grp_9", "role": "member", "updatedAt": "2026-02-01T10:00:00Z" } ], "removed": [] } }
+```
+
+`data.groups` holds the entries that were added or changed, and `data.removed` the `group` URIs of entries that left the list. Each array **MAY** be empty, but not both. A `PUT` that changes nothing emits nothing.
+
 ### 5.8. Media & Attachments
 
-Messages reference uploaded files via the `attachments` array (§5.3). An `Attachment` is `{ id, mime, url, size, filename?, hash?, width?, height?, durationMs? }`, where `hash` is a content-integrity digest in `<algo>:<base64>` form (e.g. `sha-256:…`).
+Messages reference uploaded files via the `attachments` array (§5.3). An `Attachment` is `{ id, mime, url, size, filename?, hash?, width?, height?, durationMs?, thumbnail?, expiresAt? }`, where `hash` is a content-integrity digest in `<algo>:<base64>` form (e.g. `sha-256:…`), `thumbnail` is a preview image (below), and `expiresAt` is when a short-lived `url` stops working (*Revocation*, below).
+
+#### Where to upload
+
+A client **MUST** upload every attachment to its user's **home provider**, whatever the attachment is for: a message in a channel on that provider, a message in a **remote** channel (§8.2, §8.5), a DM to a user on any provider (§7.4, §8.3), or an avatar (§6.3). The home provider stores the file and answers for its quota and abuse handling; the channel's provider only checks the `Attachment` the message carries (*Checks on attachments in a message*, below). A provider **MAY** reject an upload from a remote actor with **`403`**. Each upload names the provider it is for, its **target** (below): a client **MAY** reuse an upload in any number of messages on its target provider, and to use the same file on another provider it uploads it again with that provider as the target.
+
+**Target.** `POST /api/media` and `POST /api/media/uploads` take an optional `target`: the authority (§2.2) of the provider that will hold the message or messages that use the upload, which the provider stores in canonical form. For `POST /api/media` it is a form part named `target` beside `file`; for `POST /api/media/uploads` it is a `target` field in the request. Omitted, it is the home provider itself. A `target` that is not a valid authority is a **`400`**. The provider records the target with the upload, as it records the uploader; it is not part of the `Attachment`, since only the uploading provider acts on it. A `thumbnail` stored with an upload (*Thumbnail*, below) shares its parent upload's target. An upload whose target is the home provider is a **local upload**; any other is a **remote upload** (*Revocation*, below).
 
 #### POST /api/media
 
-Single-step upload (**REQUIRED** of all providers). The client uploads the file as `multipart/form-data` with the file in a part named **`file`** (signed per §4.4; the content digest covers the whole multipart body). The provider stores it and returns the hosted `Attachment`. The provider sets `mime`, `size` and `hash` from the stored bytes; a client-supplied filename **MAY** be used for `filename`.
+Single-step upload (**REQUIRED** of all providers). The client uploads the file as `multipart/form-data` with the file in a part named **`file`** (signed per §4.4; the content digest covers the whole multipart body). The provider stores it and returns the hosted `Attachment`. The provider sets `mime`, `size` and `hash` from the stored bytes; a client-supplied filename **MAY** be used for `filename`. The provider records which actor uploaded each attachment.
 
 **Response (`201 Created`):**
 ```json
-{ "id": "att_1", "mime": "image/png", "url": "https://cdn.a.com/att_1.png", "size": 20480, "filename": "diagram.png", "hash": "sha-256:…", "width": 1024, "height": 768 }
+{ "id": "att_1", "mime": "image/png", "url": "https://cdn.a.com/m/3f9c2a7be1d04c8f9a6b5e2d1c0f4a87/diagram.png", "size": 20480, "filename": "diagram.png", "hash": "sha-256:…", "width": 1024, "height": 768 }
 ```
 
 **Dimensions and duration.** `width` and `height` (pixels, for images and video) and `durationMs` (for audio and video) are set once, at upload, and returned in the `Attachment`:
@@ -1053,11 +1144,64 @@ Single-step upload (**REQUIRED** of all providers). The client uploads the file 
 * For a value the provider cannot determine, the uploader **MAY** supply it as an extra form part named `width`, `height` or `durationMs` beside `file`, holding a non-negative decimal integer. The provider copies a supplied value into the returned `Attachment` only when it did not determine that value itself. A supplied value that is not a non-negative integer is a **`400`**.
 * A value neither side supplied is omitted. These values are layout hints, and clients **MUST NOT** rely on them being accurate.
 
+**Thumbnail.** An attachment **MAY** carry a `thumbnail`: a preview image, itself an `Attachment` with an `image/*` `mime`, that clients show in place of the file until it is opened — for a video, its poster frame. It is set once, at upload:
+
+* The provider **MAY** generate one from the stored bytes (for example, a video frame).
+* Otherwise the uploader **MAY** supply one as a second file part named **`thumbnail`**. The provider stores it like an upload and returns it as `thumbnail`. A `thumbnail` part that is not an `image/*` file is a **`400`**; one over the size limit is a **`413`**.
+* A `thumbnail` **MUST NOT** itself carry a `thumbnail`. Clients **MUST NOT** require one: without it they show a generic placeholder.
+
+A video with its poster:
+```json
+{ "id": "att_7", "mime": "video/mp4", "url": "https://cdn.a.com/m/0c4e9b21d7f84a3b96e5d8a1c2b3f405/launch.mp4", "size": 7340032, "filename": "launch.mp4", "hash": "sha-256:…", "width": 1920, "height": 1080, "durationMs": 42000, "thumbnail": { "id": "att_8", "mime": "image/jpeg", "url": "https://cdn.a.com/m/6a1f3d58e2b94c07a8d4f1e6b9c2d370/poster.jpg", "size": 51200, "width": 1920, "height": 1080 } }
+```
+
 The returned object is then placed, unchanged, in a message's `attachments` (§7.1). Providers **MUST** enforce a maximum size and return **`413`** when exceeded; that limit **SHOULD** be advertised as `capabilities.limits.maxUploadBytes` in discovery (§3.1). Providers **SHOULD** populate `hash` so recipients can verify integrity.
 
 #### Pre-signed uploads (Optional)
 
-Providers **MAY** additionally offer a two-step flow for large media: `POST /api/media/uploads` returns `{ "uploadUrl": "…", "attachment": { "id": "…", … } }`; the client `PUT`s the bytes to `uploadUrl`; the attachment becomes referenceable once the upload completes. Clients **MUST NOT** assume this flow exists — the single-step `POST /api/media` is the interoperable baseline.
+Providers **MAY** additionally offer a two-step flow for large media. The client sends `POST /api/media/uploads` with a JSON object as its body (signed per §4.4); the one field this specification defines in it is the optional `target`, the authority of the upload's target provider (*Target*, above), and a provider **MAY** define others (for example, the file's size or type). It returns `{ "uploadUrl": "…", "attachment": { "id": "…", … } }`; the client `PUT`s the bytes to `uploadUrl`; the attachment becomes referenceable once the upload completes. Clients **MUST NOT** assume this flow exists — the single-step `POST /api/media` is the interoperable baseline.
+
+#### Serving attachments (Normative)
+
+An attachment's `url` (and its `thumbnail`'s `url`) is a **capability URL**: anyone who holds it can fetch the file, and the URL is what keeps it private. Browsers load attachments with plain `<img>` and `<video>` elements and cross-provider fetches, so:
+
+* The provider **MUST** serve the file to an unsigned `GET`, with no signature, cookie or other credential, and **MUST** follow the CORS rules of §3.4 for it.
+* Each `url` **MUST** contain at least **128 bits** of entropy from a cryptographically secure random source, so that it cannot be guessed. Nothing derivable by others — a sequential number, a timestamp, or a hash of the file's contents — counts towards those bits.
+* The provider **MUST NOT** offer any way to list or search attachment URLs, other than the messages and profiles that carry them.
+* `url` **MUST** be `https`. The provider **MAY** serve it from any host: its own domain, a CDN, or an object store on another domain. How and where it stores the bytes is up to the provider.
+* A response whose type is not `image/*`, `video/*` or `audio/*`, or is `image/svg+xml` (which can carry script), **MUST** carry `Content-Disposition: attachment`, so that a browser opening the `url` directly downloads the file instead of running it as a page of that origin. Where the host can send it, `Content-Security-Policy: sandbox` is an allowed alternative.
+* Every attachment response **SHOULD** carry `X-Content-Type-Options: nosniff`.
+* The provider **SHOULD** serve attachments from an origin other than its web client's, so that a file served there cannot act with the web client's origin.
+* The provider **SHOULD NOT** mark an attachment publicly cacheable (`Cache-Control: public`, or a shared-cache directive such as `s-maxage`) unless every message that references it is readable by anyone (a `public`-tier channel it hosts, §11.3). The uploading provider usually cannot know where an attachment is posted (a remote channel, a DM), so by default it serves attachments as `Cache-Control: private`. It **MAY** add `max-age` and `immutable`, since the bytes at a `url` never change.
+
+These rules are met with response headers, so they do not constrain how or where the provider stores the bytes. Not every host can send every header: plain object storage, including its pre-signed URLs when no CDN is in front, can typically set only `Content-Type`, `Content-Disposition`, `Cache-Control`, `Content-Encoding`, `Content-Language` and `Expires`. That is enough for the **MUST**s above; `nosniff` and `Content-Security-Policy` need a host that can send arbitrary headers, such as a CDN or the provider's own server.
+
+An object store's pre-signed `GET` URL stops working when its signature expires, so returned as an attachment `url` it is a **short-lived URL** (*Revocation*, below): it is allowed only for a local upload, with `expiresAt` set. A `url` that must be stable (a remote upload's, or an avatar's, §6.3) can still be served from an object store: for example, as a public-object or CDN URL, or as a stable URL on the provider's own host that answers each `GET` with a redirect (`302` or `307`) to a freshly minted pre-signed URL. The redirect response and its target both follow the rules above (the CORS headers of §3.4 included), and the redirect **SHOULD NOT** be cacheable for longer than the pre-signed URL it points to stays valid. Browsers follow such a redirect; another provider that fetches the URL does not (§8 *Outbound requests* treats a `3xx` as a failed request), so a provider that wants other providers to be able to fetch its attachments or avatars (for example, to check a `hash` or make a thumbnail) serves those URLs without a redirect.
+
+A leaked `url` is readable by whoever holds it until the provider stops serving it.
+
+**Revocation.** A message *references* an attachment when the attachment (or the attachment whose `thumbnail` it is) is in the `attachments` of the message's **current** version. Deleting a message (tombstoning or reaping it, §7.1) ends its references, and so does an edit that replaces `attachments` with an array that leaves the attachment out (§7.1).
+
+An upload is *referenced* while the current version of a message the home provider holds, or a profile it hosts (such as an `avatar`), references it. What the provider does with an unreferenced upload depends on its target (*Target*, above), which is fixed at upload:
+
+* A **local upload** is used only in messages and profiles the provider holds (clients reuse an upload only on its target, and the provider accepts only local uploads in the messages it holds, *Checks on attachments in a message*, below), so it knows every use. Once it has been referenced and none remains — every such message has been deleted or edited to drop it, and no profile uses it — the provider **SHOULD** stop the attachment being fetchable, in one of the two ways below.
+  * A local upload that nothing has referenced yet is **pending**: the client has not posted it. The provider **SHOULD** keep a pending upload, usable in a message or profile, for at least **24 hours** after it was stored (for a pre-signed upload, after it completed), so that a client can post it. After that period it **MAY** remove the upload, so that its `url` answers `404` or `410` and a message or profile that names it is rejected as for an unknown upload.
+* A **remote upload** is used in messages on its target provider (a remote channel, or a DM to a user there), which the home provider cannot see. The provider **MUST** give it a stable `url` without `expiresAt`, and **MUST NOT** treat it as unreferenced because no message or profile it holds references it. It **MAY** keep the upload as long as it keeps the uploader's account, or remove it after a retention period it states to its users. Clients **SHOULD** make clear to users that deleting such a message does not withdraw a URL that was already seen.
+
+Either way, **every** `url` the provider has issued for the upload stops working, including a stable `url` it served for a use that has since ended (such as a former avatar). The two ways to stop an attachment being fetchable are:
+
+* remove it, so that its `url` answers `404` or `410`, within a bounded time (RECOMMENDED: within 24 hours); or
+* serve it through **short-lived URLs**. This is only for local uploads used in messages, not for an upload used as an avatar: a profile's `avatar` has no `expiresAt` and nothing refreshes it, so its `url` **MUST** be stable (§6.3). It is not for remote uploads either, since a provider that holds a message returns its attachment `url`s as stored and never refreshes another provider's URL (*Checks on attachments in a message*, below); a remote upload keeps a stable `url` without `expiresAt`. Each time the provider returns a message it holds, it mints a fresh `url` for each local upload in it and sets `expiresAt` to when that `url` stops working; once the attachment is unreferenced it mints no more, and the `url` its upload response returned stops working too. A client whose attachment `url` has passed `expiresAt`, or answers `403`, `404` or `410`, **SHOULD** re-read the message (§7.2, §7.4) for a fresh `url` before treating the file as gone.
+
+#### Checks on attachments in a message
+
+The provider that stores a message — the channel's provider for `message.create` and `POST …/messages` (§7.1), the recipient's provider for a DM (§7.4, §8.3), and either for an edit that replaces `attachments` (§7.1) — checks each `Attachment` in it, and rejects the message with **`400`** if a check fails:
+
+* An attachment is **hosted** by the provider when its own `POST /api/media` or `POST /api/media/uploads` issued it (with its `thumbnail`). For a hosted attachment the provider **MUST** check that the `id` is one of its stored uploads, that it was uploaded by the message's author, that a pre-signed upload has completed, that it is a local upload (its target is this provider, *Target*, above), and that `mime`, `size` and `hash` equal its stored values. It stores the message with its own record of the attachment (including its `thumbnail`), not the client's copy of the optional fields.
+* When the message's author is one of its **local** users, every attachment **MUST** be hosted: its local users upload to it (*Where to upload*, above), so the provider rejects any attachment it does not host.
+* For an attachment it does not host (from an author on another provider), the provider **MUST** reject a `url` or `thumbnail.url` that is not `https`, and a `thumbnail` that itself carries a `thumbnail`. It **MUST NOT** keep an `expiresAt` the author supplied, on the attachment or its `thumbnail`: only the provider that mints a short-lived URL sets `expiresAt` (*Revocation*, above), and it does so only in messages it holds. It **SHOULD NOT** fetch the URL on the client's behalf; if it does (for example, to check `hash` or make a thumbnail), the fetch **MUST** follow the outbound-request rules of §8.
+
+Clients **MUST** treat attachments as **untrusted**. The message's provider checks only the attachments it hosts, and a client cannot tell which hosts those are (a provider may serve from any host, above), so for any attachment the `mime`, `size`, `hash`, dimensions and thumbnail may be claims of the author that nobody checked. A client **SHOULD** verify `hash` when present before showing the file as that attachment, and **MUST NOT** open a fetched file as an active document (for example, render it as HTML or run it), whatever its `mime` says. The serving headers above guard browsers that open a `url` directly; they do not replace this rule.
 
 ---
 
@@ -1145,9 +1289,11 @@ All fields are optional; a field that is absent is left unchanged. `"avatar": nu
 The provider checks the `avatar` URL as follows:
 
 * It **MUST** reject with `400` a value that is not an `https` URL.
-* It **SHOULD** reject with `400` a URL it does not host itself (one that did not come from its own `POST /api/media`), and **SHOULD** reject with `400` a URL it hosts whose `Attachment` `mime` is not `image/*`.
+* It **SHOULD** reject with `400` a URL it does not host itself (one that did not come from its own `POST /api/media`), and **SHOULD** reject with `400` a URL it hosts whose `Attachment` `mime` is not `image/*` or whose upload is a remote upload (§5.8).
 * If it accepts a URL it does not host and fetches it (for example, to check or cache it), that fetch follows the outbound-request rules of §8.
 * An avatar URL it hosts is an attachment URL, so the CORS rules of §3.4 apply to it.
+* An avatar URL it hosts **MUST** be stable: it keeps working, without `expiresAt`, for as long as the profile uses it, since a profile is not refreshed the way a message is (§5.8). If the provider serves the upload through short-lived URLs (*Revocation*, §5.8) and the client sends one, the provider stores in the profile a stable `url` for the same upload instead, and the updated profile in the response carries it. To serve an avatar from an object store, the provider uses a stable URL such as one that redirects to a fresh pre-signed URL (*Serving attachments*, §5.8).
+* When the profile stops using an upload (a new `avatar`, or `"avatar": null`), the upload's references from the profile end (*Revocation*, §5.8).
 
 ### 6.4. Presence endpoint
 
@@ -1196,6 +1342,8 @@ X-OFSCP-Signature: <signed per §4.4, or omitted for an anonymous viewer (§6.1)
 ```
 
 Response **MUST** only include groups visible to the viewer per the subject’s membership visibility settings (§6.1). Even when `membershipVisibility` permits the viewer, the listing **MUST** include only groups this provider hosts, and only those the viewer may read under the group's `tier` (§11, §11.3 condition 1): an anonymous viewer sees only `public`/`discoverable` groups. A viewer not permitted gets the uniform empty listing of §6.1. **Errors:** `401`, `403` and `404` as in §6.1.
+
+It lists only groups the provider hosts. Membership pointers for remote groups (§5.7, *My groups*) are recorded by the user's own client, unchecked, and **MUST NOT** be listed here.
 
 Example response:
 ```json
@@ -1409,7 +1557,7 @@ The standard `type` strings are the following; a `type` not listed here is handl
 | `subscribe` | Subscribe this connection to one or more channel streams. | `WsSubscribe` |
 | `unsubscribe` | Unsubscribe this connection from one or more channel streams. | `WsUnsubscribe` |
 | `message.create` | Create (post) a message of any type (`message`, `memo`, `article`) into a channel timeline. | `WsMessageCreate` |
-| `message.update` | Edit an existing message (author-only, within `editUntil`). | `WsMessageUpdate` |
+| `message.update` | Edit an existing message (author-only; within `editUntil` when the message has one). | `WsMessageUpdate` |
 | `message.delete` | Delete (tombstone) a message. | `WsMessageDelete` |
 | `reaction.add` | Add a reaction to a message. | `WsReactionAdd` |
 | `reaction.remove` | Remove your reaction from a message. | `WsReactionRemove` |
@@ -1441,6 +1589,7 @@ The standard `type` strings are the following; a `type` not listed here is handl
 | `presence.unsubscribed` | Acknowledgement of a successful `presence.unsubscribe`. | `WsPresenceUnsubscribed` |
 | `presence.update` | A subscribed user's presence changed (§7.5). | `WsPresenceUpdate` |
 | `member.updated` | A group member's role or nickname changed (§5.7). | `WsMemberUpdated` |
+| `groups.updated` | The user's group list changed: a membership pointer or a membership on this provider (§5.7, *My groups*). | `WsGroupsUpdated` |
 | `notification.created` | A new entry in the user's notification feed (§10.1). | `WsNotificationCreated` |
 | `read.updated` | The user's read markers advanced on another of their devices (§7.7). | `WsReadUpdated` |
 | `call.started` | A call became active in a subscribed channel. | `WsCallStarted` |
@@ -1569,9 +1718,11 @@ Posting a message is the `message.create` WebSocket command, or its REST equival
 | `content` | yes | The message body (§5.3). |
 | `clientMessageId` | no (**SHOULD** be set) | Client-chosen idempotency key (below). |
 | `type` | no | `message`, `memo` or `article`; omitted means `message`. |
-| `attachments` | no | `Attachment` objects as returned by `POST /api/media` (§5.8); omitted means `[]`. |
+| `attachments` | no | `Attachment` objects as returned by `POST /api/media` at the author's home provider (§5.8); omitted means `[]`. |
 | `reference` | no | Makes the message a reply (§7.2): `{ "type": "reply", "id": "<parent id>" }`. On create, `type` **MUST** be `"reply"`. |
 | `tags` | no | An array of strings, as on `BaseMessage` (§5.3). |
+| `mentions` | no | Actors the message mentions (§5.3, *Mentions*). |
+| `title`, `summary`, `cover` | no | Article fields (§5.3); ignored on other types. |
 | `metadata` | no | Metadata objects (§5.4); omitted means `[]`. |
 
 Over WebSocket the body is the command's `data`, which also carries `groupId` and `channelId` (`ws/message-create.json`). Over REST those two are in the path (`message-create-request.json`).
@@ -1618,16 +1769,16 @@ Server → Client event (fan-out to all subscribed clients, including the author
 
 A memo with an image, then a reply to it, are created the same way:
 ```json
-{ "id": "cli_201", "type": "message.create", "data": { "groupId": "grp_1", "channelId": "chn_general", "clientMessageId": "cmsg_abc124", "type": "memo", "content": { "mime": "text/plain", "text": "Our new logo" }, "attachments": [ { "id": "att_1", "mime": "image/png", "url": "https://cdn.a.com/att_1.png", "size": 20480, "width": 1024, "height": 768 } ], "tags": ["#design"] } }
+{ "id": "cli_201", "type": "message.create", "data": { "groupId": "grp_1", "channelId": "chn_general", "clientMessageId": "cmsg_abc124", "type": "memo", "content": { "mime": "text/plain", "text": "Our new logo" }, "attachments": [ { "id": "att_1", "mime": "image/png", "url": "https://cdn.a.com/m/3f9c2a7be1d04c8f9a6b5e2d1c0f4a87/diagram.png", "size": 20480, "width": 1024, "height": 768 } ], "tags": ["#design"] } }
 { "id": "cli_202", "type": "message.create", "data": { "groupId": "grp_1", "channelId": "chn_general", "clientMessageId": "cmsg_abc125", "content": { "mime": "text/plain", "text": "Love it" }, "reference": { "type": "reply", "id": "msg_1000" } } }
 ```
 
 Rules (both transports):
 
-* The provider sets `id`, `author` (the authenticated actor), `createdAt` and `permissions`, and stores `type`, `content`, `attachments`, `reference`, `tags` and `metadata` as given, with the defaults above. The stored message is a `BaseMessage` (§5.3).
+* The provider sets `id`, `author` (the authenticated actor), `createdAt` and `permissions`, and stores `type`, `content`, `attachments`, `reference`, `tags`, `mentions`, `metadata` and, for an article, `title`, `summary` and `cover` as given, with the defaults above (attachments as §5.8 *Checks on attachments in a message* says). The stored message is a `BaseMessage` (§5.3).
 * The provider **MUST** reject with **`404`** (`not_found`) a create in a group or channel that does not exist, or in a channel the actor cannot read (effective read access, §11.3). The two cases get the same answer: a create is answered as for a missing channel (§5.2.1, §7.3). (Every other channel surface answers a channel the caller cannot read as `404` too, whether or not the caller may read its group: §11.3.)
 * The provider **MUST** reject with **`403`** (`forbidden`) a create the actor may not make: one whose `type` the channel's `post:<type>` permission does not grant, or, when the actor is reply-restricted, one without a `reference` or one whose parent's `type` `replyOnlyTo` does not list (§5.2.1).
-* The provider **MUST** reject with **`400`** (`bad_request`) a body that does not match the schema, an invalid `Attachment` or metadata object, a `reference` whose `type` is not `"reply"`, or a `reference` whose `id` is not a message in the same channel (§7.2).
+* The provider **MUST** reject with **`400`** (`bad_request`) a body that does not match the schema, an invalid `Attachment` (including one that fails the checks of §5.8) or metadata object, an article `cover` that names none of its `attachments` (§5.3), a non-canonical actor in `mentions` it does not convert (§2.2), a `reference` whose `type` is not `"reply"`, or a `reference` whose `id` is not a message in the same channel (§7.2).
 * Over WebSocket, a rejection is an `error` event (§7.3) with the command's `id` in `correlationId`.
 
 Order of checks. The provider handles a create in this order and stops at the first step that answers:
@@ -1665,11 +1816,30 @@ The body is `MessageCreate` (`message-create-request.json`), and the rules above
 
 A request to edit or delete a message in a channel the caller cannot read is answered `404` first, as for a missing channel (§11.3); the `403` rules below apply only to a caller who can read the channel.
 
-**Editing** replaces a message's `content`. Only the **author** may edit, and only while `permissions.editUntil` (§5.3) is in the future; otherwise the provider **MUST** reject with `403`. A successful edit sets `editedAt` on the message and fans out `message.updated` to subscribers, carrying the full updated `Message` (§5.3), as `message.created` does.
+**Editing** replaces some of a message's fields. Only the **author** may edit. If the message has `permissions.editUntil` (§5.3), the author may edit only while it is in the future; a message without `editUntil` has no time limit. Otherwise the provider **MUST** reject with `403`. Providers choose the window per message; they **SHOULD** give `article` messages a longer window than chat, or none.
+
+An edit (`MessageUpdate`, in `defs/messaging.json`) carries at least one of these fields. Each field present replaces the stored value; each field absent is left unchanged:
+
+| Field | Meaning |
+| --- | --- |
+| `content` | The new body (§5.3). |
+| `attachments` | The new `attachments` array, in full. The checks of §5.8 apply to it as to a create. |
+| `tags` | The new `tags` array, in full. |
+| `mentions` | The new `mentions` array, in full (§5.3). |
+| `title`, `summary`, `cover` | Article fields (§5.3). `null` removes the field. Ignored on other types, and do not count towards the one field an edit needs there. |
+
+`type`, `reference` and `metadata` cannot be edited; the provider ignores them in an edit. The provider applies the same `400` rules as for a create to the fields present, and to the result: an edit that leaves an article's `cover` naming none of its `attachments` is a `400`. An edit that carries none of the fields above is a `400`, and so is an edit of a message whose `type` is not `article` that carries only article fields. An edit that drops an attachment from `attachments` ends that message's reference to it, with the same *Revocation* consequences as a delete (§5.8). Edits never create notification entries (§10.1).
+
+A successful edit sets `editedAt` on the message and fans out `message.updated` to subscribers, carrying the full updated `Message` (§5.3), as `message.created` does.
 
 Client → Server:
 ```json
 { "id": "cli_210", "type": "message.update", "data": { "groupId": "grp_1", "channelId": "chn_general", "messageId": "msg_999", "content": { "mime": "text/plain", "text": "hi (edited)" } } }
+```
+
+An article's author retitles it and replaces its tags, leaving its body unchanged:
+```json
+{ "id": "cli_211", "type": "message.update", "data": { "groupId": "grp_1", "channelId": "chn_blog", "messageId": "msg_3", "title": "Welcome to the guild (updated)", "tags": ["#intro", "#faq"] } }
 ```
 
 **Deleting** is a soft **tombstone**: the message `id` is retained, `content` is cleared, and `deletedAt` is set, so reply references (§5.3) and resume cursors (§7.1) stay valid. The **author** or a member with the `moderate` role may delete. A successful delete fans out `message.deleted`:
@@ -1681,7 +1851,7 @@ Providers **MAY** reap tombstones after a retention period. Clients **MUST** ren
 
 **REST equivalents** (for non-WS clients) operate on the same rules:
 
-* `PATCH /api/groups/{groupId}/channels/{channelId}/messages/{messageId}` — body `{ "content": { … } }`; returns the updated message (with `editedAt`).
+* `PATCH /api/groups/{groupId}/channels/{channelId}/messages/{messageId}` — body `MessageUpdate` (`message-update-request.json`), as above; returns the updated message (with `editedAt`).
 * `DELETE /api/groups/{groupId}/channels/{channelId}/messages/{messageId}` — returns `204 No Content`; the message becomes a tombstone.
 
 #### Reactions
@@ -1921,6 +2091,14 @@ A client **MAY** still `subscribe` with a `dmId` as the target (e.g. to supply a
 { "id": "cli_500", "type": "subscribe", "data": { "channels": ["dm_c2a3a0d4bc7aa54700d2f412c42fc0155df6071e502977e4988933eef7e46868"] } }
 ```
 
+**Following your sent messages on the counterparty's provider.** The messages a user sends live in the counterparty's inbox, so edits to them, deletes, and the counterparty's reactions to them happen on the counterparty's provider, and implicit delivery there reaches only the counterparty. To see them live, a participant whose counterparty is on **another** provider **MAY** open a WebSocket to the counterparty's home provider (authenticating there as a remote actor, as in §8.5 steps 2–3) and `subscribe` with the `dmId` as the target. That provider:
+
+* **MUST** accept the subscription only if the actor is a participant of the conversation, that is, if `{dmId}` equals the id derived from the actor and one of the provider's local users (found as in *Sending*, above). Otherwise it rejects the subscription with an `error` (`code: "forbidden"`). The federation policy of §8 and the guest rule of §8.5 apply to the connection.
+* delivers to that subscription every `dm.message` and `dm.reaction` event for the conversation's messages it holds: the messages the subscriber sent, including their edits and deletes (re-sent as `dm.message`, below) and reactions to them by either participant. It **MAY** also deliver the conversation's `dm.typing` events.
+* supports resume with `since`, in the cursor space of its `GET /api/dms/{dmId}/messages` (§7.2), as for a channel.
+
+A client that does not hold such a connection still sees these changes by reading the counterparty's provider (*Reading a whole conversation*, above, and the reactions listing below).
+
 When a DM is delivered to the user's inbox, the provider emits `dm.message`:
 
 ```json
@@ -1936,7 +2114,7 @@ When a DM is delivered to the user's inbox, the provider emits `dm.message`:
 }
 ```
 
-`data.message` is the full canonical `Message` (§5.3), the same object that `GET /api/dms/{dmId}/messages` returns, and **MAY** carry `clientMessageId`. Only the recipient receives `dm.message`, since only their inbox stores the message. Editing and deleting DMs follow the same author/tombstone rules as §7.1, applied against the recipient's stored copy.
+`data.message` is the full canonical `Message` (§5.3), the same object that `GET /api/dms/{dmId}/messages` returns, and **MAY** carry `clientMessageId`. Implicit delivery of `dm.message` reaches only the recipient, since only their inbox stores the message; the sender, when on another provider, receives it only through a `dmId` subscription there (above). Editing and deleting DMs follow the same author/tombstone rules as §7.1, applied against the recipient's stored copy.
 
 **Edits and deletes are re-sent as `dm.message`.** There is no separate DM update event: after an edit or delete, the provider emits `dm.message` again with the same `message.id`, carrying the updated `Message` (with `editedAt` set after an edit; with `deletedAt` set and `content` cleared after a delete). Clients **MUST** treat a `dm.message` whose `message.id` they already hold as a replacement of that message, not a new one.
 
@@ -1944,7 +2122,7 @@ When a DM is delivered to the user's inbox, the provider emits `dm.message`:
 
 DMs reuse the message object of §5.3, so they also support reactions (§7.1), replies (§7.2) and typing indicators (§7.1), scoped to a `dmId` instead of a `(groupId, channelId)` pair. All of the following are OPTIONAL and additive; a provider that omits them remains conformant.
 
-**Reactions.** A DM reaction is a `Reaction` object (§5.3) referencing a DM message. Because a DM message is stored only in the recipient's inbox (§8.3, source of truth), its reactions are **stored alongside the target message** — on whichever provider holds that message. A reaction therefore follows the **same client→provider delivery path as the DM message itself** (§8.3): the reacting client signs (§4.4) and delivers to the message's home provider, which stores the reaction and emits `dm.reaction` to the conversation's local subscribers.
+**Reactions.** A DM reaction is a `Reaction` object (§5.3) referencing a DM message. Because a DM message is stored only in the recipient's inbox (§8.3, source of truth), its reactions are **stored alongside the target message** — on whichever provider holds that message. A reaction therefore follows the **same client→provider delivery path as the DM message itself** (§8.3): the reacting client signs (§4.4) and delivers to the message's home provider, which stores the reaction and emits `dm.reaction` to its local participant's connections and to the conversation's subscribers, including a remote participant's (*Real-time*, above).
 
 * `PUT /api/dms/{dmId}/messages/{messageId}/reactions/{key}` — add your reaction (optional body `{ "unicode": "…", "image": "…" }`); idempotent (at most one reaction per `key` per message per user).
 * `DELETE /api/dms/{dmId}/messages/{messageId}/reactions/{key}` — remove your reaction. `204 No Content`.
@@ -1968,7 +2146,7 @@ The provider emits a `dm.reaction` event mirroring the channel `reaction.added`/
 }
 ```
 
-**Edits & deletes.** Editing and deleting a DM message follow the **same storage-follows-message rule** as reactions: the message lives only on the provider that holds it (the recipient's inbox, §8.3), so a `PATCH`/`DELETE` of a message the actor **sent** is forwarded to that message's home provider over the same client→provider delivery path (mirroring DM-send and DM-reaction). Only the **original author** may edit or delete, and the provider applies the §7.1 author/tombstone rules against its stored copy and emits the resulting `dm.message` update to local subscribers. A provider-signed federation ingest variant exists for edit/delete just as it does for delivery and reactions (§8.3).
+**Edits & deletes.** Editing and deleting a DM message follow the **same storage-follows-message rule** as reactions: the message lives only on the provider that holds it (the recipient's inbox, §8.3). To edit or delete a message the actor **sent**, the author's client signs (§4.4) the `PATCH` (body `MessageUpdate`, as in §7.1) or `DELETE` and sends it directly to that message's home provider, over the same client→provider delivery path as DM-send and DM-reaction. No provider forwards it. Only the **original author** may edit or delete, and the provider applies the §7.1 author/tombstone and edit rules against its stored copy (including the attachment checks of §5.8 for an edit that replaces `attachments`) and emits the resulting `dm.message` update to its local participant's connections and to the conversation's subscribers (*Real-time*, above).
 
 **Replies.** Threading works exactly as in §7.2: a reply carries `reference.type === "reply"` with `reference.id` set to the parent DM message's `id`, and `reference.id` **MUST** resolve to a message in the **same conversation**. Providers expose the same reply listing as §7.2, DM-scoped:
 
@@ -2136,7 +2314,7 @@ Recipients **MAY** cache discovery per its HTTP caching headers; an entry those 
 
 ### 8.2. Remote channel participation
 
-Remote users join exactly as local users do: by sending a user-signed (§4.4) request **directly to the group's home provider**. There is no provider-to-provider join relay. The group's provider verifies the signature by resolving the actor's keys from the actor's home provider (§4.6).
+Remote users join exactly as local users do: by sending a user-signed (§4.4) request **directly to the group's home provider**. There is no provider-to-provider join relay. The group's provider verifies the signature by resolving the actor's keys from the actor's home provider (§4.6). After joining, the client **SHOULD** record a membership pointer at its own home provider (§5.7, *My groups*), so that the user's other devices find the group.
 
 * `POST /api/groups/{groupId}/join` (§5.7) is the canonical join.
 * `POST /api/groups/{groupId}/channels/{channelId}/join` is a convenience alias for clients that start from a channel link. OFSCP v0.1 has **no per-channel membership**: this endpoint joins the channel's **parent group** under the group's `joinPolicy` and tier, and responds exactly as §5.7 `join` does (`201` + `Member` for `open`; `202` + `JoinRequest` for `request`; `403` for `invite` or a `private`-tier group). If the caller is already a member it returns **`200`** with the existing `Member`. Access to the specific channel then follows §11.3. The alias is a group operation, so the §11.3 *hidden channels* rule does not apply to it: it **MUST** answer exactly as `POST /api/groups/{groupId}/join` would, whether or not `{channelId}` exists or is readable, so that it reveals nothing about the channel.
@@ -2147,11 +2325,11 @@ The local DM lifecycle (conversation id derivation, listing, reading, real-time)
 
 * **Source of Truth:** The recipient's home provider is the authoritative store for that user's inbox. v0.1 keeps **no sender copy** — a DM is stored only in the recipient's inbox (§7.4).
 * **Conversation id:** `{dmId}` is derived deterministically from the two participants (§7.4); both parties compute it identically without coordination.
-* **Client-to-Remote Delivery:** Clients **MUST** deliver DMs directly to the recipient's home provider via `POST /api/federation/dms/{dmId}/messages`, user-signed (§4.4). The body is a single message (`clientMessageId`, `content`, optional `to`, `attachments` and `reference`). After delivering, the client records a conversation pointer at its own home provider (§7.4).
+* **Client-to-Remote Delivery:** Clients **MUST** deliver DMs directly to the recipient's home provider via `POST /api/federation/dms/{dmId}/messages`, user-signed (§4.4). The body is a single message (`clientMessageId`, `content`, optional `to`, `attachments`, `mentions` and `reference`); its attachments are uploaded at the sender's home provider and checked by the recipient's provider (§5.8). After delivering, the client records a conversation pointer at its own home provider (§7.4).
 * **Verification:** The receiving provider **MUST** reject the delivery with **`400`** when `{dmId}` does not equal the id derived from `{author, recipient}`, preventing delivery into a conversation the author is not part of.
 * **Storage:** The recipient's provider stores the message in the recipient's inbox and emits `dm.message` to the recipient's subscribers (§7.4).
 * **Reactions (OPTIONAL):** A DM reaction is stored alongside its target message — i.e. on the provider that holds that message (the source of truth above). Add/remove therefore follow the **same client→provider delivery path as the DM message**: the reacting client signs (§4.4) and delivers to the message's home provider (e.g. `PUT|DELETE /api/federation/dms/{dmId}/messages/{messageId}/reactions/{key}`), which stores it and emits `dm.reaction` (§7.4). No sender copy.
-* **Edits & deletes (OPTIONAL):** A DM message edit/delete is likewise applied on the provider that holds the message (the source of truth above), so editing/deleting a message the actor **sent** follows the **same client→provider delivery path as the DM message**: the author signs (§4.4) and delivers to the message's home provider (e.g. `PATCH|DELETE /api/federation/dms/{dmId}/messages/{messageId}`), which applies the §7.1 author/tombstone rules and emits the resulting `dm.message` update (§7.4). Only the original author may do so. No sender copy.
+* **Edits & deletes (OPTIONAL):** A DM message edit/delete is likewise applied on the provider that holds the message (the source of truth above), so editing/deleting a message the actor **sent** follows the **same client→provider delivery path as the DM message**: the author signs (§4.4) and delivers to the message's home provider (e.g. `PATCH|DELETE /api/federation/dms/{dmId}/messages/{messageId}`; the `PATCH` body is `MessageUpdate`, `message-update-request.json`, §7.1), which applies the §7.1 author/tombstone rules and emits the resulting `dm.message` update (§7.4). Only the original author may do so. No sender copy.
 
 #### Confidentiality (Normative)
 
@@ -2174,7 +2352,7 @@ Cross-provider consumption is built from primitives already defined:
 
 OFSCP v0.1 delivers real-time channel events across providers with a **direct-WebSocket** model: a remote member connects its WebSocket **straight to the channel's home provider** and subscribes there, exactly as a local member does (§7.1). The channel's home provider is the single authority for the channel timeline; there is no message relay or store-and-forward between providers for channel messages.
 
-A provider advertises support with `capabilities.federation.realtimeDelivery: "direct-ws"` in discovery (§3.1).
+A provider advertises support with `capabilities.federation.realtimeDelivery: "direct-ws"` in discovery (§3.1). The same connection also carries a DM participant's `dmId` subscriptions on that provider (§7.4, *Real-time*).
 
 #### Remote subscribe flow
 
@@ -2308,7 +2486,7 @@ Delivery requests **MUST** be **provider-signed** (§8.1): the originating provi
 
 A provider **MAY** keep a per-user **notification feed**: a list of channel events that concern the user. The feed is **provider-local** — a provider creates entries only for its own users, from messages in channels it hosts. (Notifying a user about activity on another provider is future work, §13.) Providers that offer it advertise nothing extra; clients discover it by calling the endpoint (`404` if not offered).
 
-**Mentions.** A mention is `@handle` or `@handle@domain` in a message's `content.text`, matched case-insensitively and lowercased, where:
+**Mentions.** When a message carries `mentions` (§5.3), the users it mentions are exactly the actors listed there, and its text is not parsed. Otherwise a mention is `@handle` or `@handle@domain` in a message's `content.text`, matched case-insensitively and lowercased, where:
 
 * the `@` is not preceded by a letter, digit, `_`, or `@` (so `bob@example.com` in prose is not a mention);
 * `handle` is the longest following run of handle characters (`[a-z0-9_-]`, §2.2.1);
@@ -2461,6 +2639,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Support password-based login, and registration according to the advertised registration mode (§4.1.1)
 - [ ] Issue scoped, short-lived bootstrap tokens on registration/login (§4.2)
 - [ ] Implement device key registration (bootstrap-authenticated), listing, and revocation, closing revoked keys' WebSocket connections with `4003` (§4.7)
+- [ ] Encode every `public_key` as the raw 32-byte Ed25519 key in padded standard base64, and reject (`400`) a registration whose key does not decode to 32 bytes (§4.3.2)
 - [ ] Validate Ed25519 request signatures over the §4.4.2 canonical string, including authority binding and nonce replay rejection, with one bounded provider-wide replay store that records a nonce only after the signature verifies (§4.5)
 - [ ] Apply the outbound-request rules (https only, public addresses only, no redirects) to every request to a host named by someone else (§8)
 - [ ] Apply federation allow/deny policy to every outbound request and to every signed inbound request (`403` at the start of §4.5 step 6 or §8.1 step 2, before any key or discovery fetch; WebSocket `4001`); answer unsigned requests to public endpoints regardless (§8)
@@ -2476,12 +2655,18 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Support message creation of every type (`message`, `memo`, `article`) with `attachments`, `reference`, `tags` and `metadata`, over both `message.create` and `POST …/messages`, gated by `post:<type>` and by `replyOnly` / `replyOnlyTo` (which only a valid reply, `reference.type` `"reply"` naming an existing message in the channel, satisfies), answering `404` for a channel the actor cannot read (§5.2.1, §7.1)
 - [ ] Treat `(author, channelId, clientMessageId)` as idempotent, running only authentication, visibility and the actor's permission checks before the duplicate lookup and returning the existing message on a duplicate (over WebSocket as a `message.created` with no `cursor`); echo `clientMessageId` on the author's `message.created`, live or replayed, and on every create response (§7.1, §7.4)
 - [ ] Carry the full canonical `Message` in `message.created`, `message.updated` and `dm.message` (§7.1, §7.4)
-- [ ] Support message edit (author-only, `editUntil`) and tombstone delete (§7.1)
-- [ ] Support single-step media upload at `POST /api/media`, setting `mime`, `size` and `hash`, and `width`, `height` and `durationMs` from the bytes when it can determine them or from the uploader otherwise (§5.8)
-- [ ] Answer `PATCH /api/me/profile` with the updated `UserProfile`, clear the avatar on `"avatar": null`, and reject a non-`https` `avatar` (SHOULD also reject one it does not host) (§6.3)
+- [ ] Support message edit (author-only; within `editUntil` when set, with no limit when absent) replacing any of `content`, `attachments`, `tags`, `mentions` and the article fields, and tombstone delete (§7.1)
+- [ ] Accept `text/plain` and `text/markdown` bodies for every message type; store the article fields `title`, `summary` and `cover` (rejecting a `cover` that names none of the message's attachments) and ignore them on other types; store `mentions` and use it in place of text parsing when present (§5.3, §10.1)
+- [ ] Support single-step media upload at `POST /api/media`, recording its `target` (default: this provider) and setting `mime`, `size` and `hash`, and `width`, `height` and `durationMs` from the bytes when it can determine them or from the uploader otherwise, and accepting an uploader's `thumbnail` part (§5.8)
+- [ ] Serve attachments as capability URLs: `https`, at least 128 bits of entropy, unlisted, fetchable unsigned, with the §3.4 CORS headers, from any host the provider chooses (§5.8)
+- [ ] Check each attachment in a stored message: for one it hosts (from `POST /api/media` or a completed `POST /api/media/uploads`), that the `id` exists, was uploaded by the author, is a local upload, and matches in `mime`, `size` and `hash`; reject any it does not host from a local author; for a remote author's, that `url` and `thumbnail.url` are `https` and the `thumbnail` has no `thumbnail`, dropping the author's `expiresAt` and fetching only under the §8 outbound rules (§5.8)
+- [ ] Serve attachments with `Content-Disposition: attachment` (or `Content-Security-Policy: sandbox` where the host can send it) for types other than images (or for SVG), video and audio, and with `X-Content-Type-Options: nosniff` where the host can send it (§5.8)
+- [ ] Give remote uploads a stable `url` without `expiresAt`, and never treat one as unreferenced because no message or profile it holds references it; use short-lived URLs (such as pre-signed `GET` URLs, with `expiresAt`) only for local uploads in messages; keep a pending local upload postable for at least 24 hours before removing it (§5.8)
+- [ ] Keep each user's group list at `GET`/`PUT`/`DELETE /api/me/groups` (its own memberships plus unchecked pointers to remote groups) and emit `groups.updated` (§5.7)
+- [ ] Answer `PATCH /api/me/profile` with the updated `UserProfile`, clear the avatar on `"avatar": null`, reject a non-`https` `avatar` (SHOULD also reject one it does not host, one whose `mime` is not `image/*`, and a remote upload), and keep a hosted avatar's `url` stable, never short-lived (§6.3)
 - [ ] Serve `GET /api/users/{userRef}/profile`, `…/presence` and `…/groups` to signed and anonymous viewers, evaluating visibility per §6.1 (subject always; `denyList`, then `allowList`, then the setting); answer a viewer not permitted with the uniform `200` responses (base profile, `offline`, empty groups), never `403`, and every non-hosted, unknown, disabled or invalid subject with the same `404`; list only hosted groups the viewer may read (§6.1–§6.5)
 - [ ] Treat `PUT /api/me/presence` as a full replace that rejects `offline` with `400`, and `PUT /api/me/privacy` as a partial update that rejects an actor in both lists, or an over-long list, with `400` (§6.4, §6.6)
-- [ ] Support direct messages: deterministic `dmId` derivation, inbox-only storage (no sender copy), the `{dmId}`/`to` verification on delivery, conversation pointers and `dm.conversation`, conversation listing/reading, and `dm.message` real-time delivery (§7.4)
+- [ ] Support direct messages: deterministic `dmId` derivation, inbox-only storage (no sender copy), the `{dmId}`/`to` verification on delivery, conversation pointers and `dm.conversation`, conversation listing/reading, `dm.message` real-time delivery, and `dmId` subscriptions from a remote participant (§7.4)
 - [ ] Support the explicit contacts model (request/accept/remove, local and federated) backing the `contacts` visibility tier (§6.7)
 - [ ] Publish provider signing key(s) in discovery and sign provider-to-provider requests (§8.1)
 - [ ] Accept direct-WS connections from remote members — resolve remote keys via §4.6, enforce prior membership + tier at subscribe-time — and advertise `capabilities.federation.realtimeDelivery` (§8.5)
@@ -2495,6 +2680,13 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Support the `private` tier
 - [ ] Expose `GET /api/tiers` endpoint
 - [ ] Provide metadata schema registry (optional entries allowed)
+
+### Provider **SHOULD**
+
+- [ ] Include the caller's `membership` in `GET /api/groups/{groupId}` for a signed member, never marking that answer publicly cacheable (§5.5)
+- [ ] Not mark attachments publicly cacheable unless all their messages are public, and stop serving a local upload once no current message version or profile it holds references it: remove it within a bounded time, or serve it through short-lived URLs with `expiresAt` (§5.8)
+- [ ] Serve attachments from an origin other than the web client's (§5.8)
+- [ ] Give `article` messages a longer edit window than chat, or none (§7.1)
 
 ### Provider **MAY** (optional)
 
@@ -2516,6 +2708,10 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Support all message types or graceful fallback
 - [ ] Treat the `message.created` that answers a duplicate create (no `cursor`) as the result of the pending send, not as a new message, and never store it as a resume point (§7.1)
 - [ ] Set an avatar by uploading it to the home provider (`POST /api/media`) and then sending its `url` in `PATCH /api/me/profile` (§6.3)
+- [ ] Upload every attachment to the home provider, including for posts to remote channels and DMs, naming as `target` the provider that will hold the message, and reusing an upload only in messages on its target, uploading again for any other provider (§5.8)
+- [ ] Render `text/plain` and CommonMark `text/markdown`, showing raw HTML in Markdown as text; render `text/html` only through the §5.3 allow-list sanitizer (or as text with tags removed); make only `http`, `https`, `mailto` and `attachment:` links active (§5.3)
+- [ ] Resolve `attachment:<id>` references against the message's own attachments, show unreferenced attachments after the body, and, when an article has no `title`, use its body's first block as the title if that block is a level-1 heading (ATX or Setext, or `<h1>`) (§5.3)
+- [ ] Treat attachment metadata and files as untrusted, never opening a fetched file as an active document (§5.8)
 
 ### Client **SHOULD**
 
@@ -2523,6 +2719,10 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Provide UX for tiers (access + discoverability)
 - [ ] Handle federation latency + retries
 - [ ] Name the DM recipient in `to`, record a conversation pointer at the home provider after a cross-provider send, and read sent history from the counterparty's provider (§7.4)
+- [ ] Not load remote content a message body names, or the attachments of an author on another provider than the message's, without a user action (§5.3)
+- [ ] Set `mentions` on messages that mention users (§5.3)
+- [ ] Record a membership pointer at the home provider after joining a remote group, and remove it after leaving (§5.7)
+- [ ] Refresh an expired or failing attachment `url` by re-reading its message (§5.8)
 
 ---
 

@@ -1,0 +1,8 @@
+{
+  "groups": [
+    { "group": "https://a.com/api/groups/grp_1", "role": "owner", "updatedAt": "2025-03-01T12:00:00Z" },
+    { "group": "https://b.com/api/groups/grp_9", "role": "member", "updatedAt": "2026-02-01T10:00:00Z" },
+    { "group": "https://c.example/api/groups/grp_x", "updatedAt": "2026-02-03T08:15:00Z" }
+  ],
+  "metadata": []
+}

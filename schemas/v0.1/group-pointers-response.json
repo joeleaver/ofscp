@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/group-pointers-response.json",
+  "title": "OFSCP GET /api/me/groups response (v0.1)",
+  "description": "The authenticated user's group list at their home provider (§5.7, My groups): the groups it hosts that the user belongs to, plus pointers to remote groups.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["groups", "metadata"],
+  "properties": {
+    "groups": {
+      "type": "array",
+      "items": { "$ref": "./defs/groups.json#/$defs/GroupPointer" }
+    },
+    "metadata": { "$ref": "./defs/objects.json#/$defs/MetadataList" }
+  }
+}
