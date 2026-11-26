@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/group-pointer-request.json",
+  "title": "OFSCP PUT /api/me/groups/{groupRef} request (v0.1)",
+  "description": "Optional body recording a membership pointer (§5.7, My groups). role is stored as a non-authoritative hint.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "role": { "$ref": "./defs/groups.json#/$defs/Role" }
+  }
+}

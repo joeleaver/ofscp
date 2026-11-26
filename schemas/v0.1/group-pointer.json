@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/group-pointer.json",
+  "title": "OFSCP Group pointer (v0.1)",
+  "description": "An entry in the user's group list (§5.7, My groups), as returned by GET and PUT /api/me/groups.",
+  "$ref": "./defs/groups.json#/$defs/GroupPointer"
+}

@@ -95,6 +95,10 @@
           "items": { "$ref": "#/$defs/RoleDefinition" },
           "description": "Optional catalogue of the roles this group defines, including custom roles beyond the canonical owner/admin/member/guest (§5.2). Absent = canonical roles only."
         },
+        "membership": {
+          "$ref": "#/$defs/Membership",
+          "description": "The caller's own membership, present only in an answer to a request signed by a member (§5.5). Absence does not prove the caller is not a member."
+        },
         "createdAt": { "$ref": "./common.json#/$defs/Rfc3339DateTime" },
         "updatedAt": { "$ref": "./common.json#/$defs/Rfc3339DateTime" },
         "metadata": { "$ref": "./objects.json#/$defs/MetadataList" }
@@ -168,6 +172,34 @@
           "description": "Optional group-scoped display name that overrides the user's global `UserProfile.displayName` (§5.1.1) within this group only. Absent = use the global display name."
         },
         "joinedAt": { "$ref": "./common.json#/$defs/Rfc3339DateTime" }
+      }
+    },
+    "Membership": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["role", "joinedAt"],
+      "description": "The caller's own membership of a group, returned as Group.membership by GET /api/groups/{groupId} to a signed member (§5.5). Authoritative.",
+      "properties": {
+        "role": { "$ref": "#/$defs/Role" },
+        "joinedAt": { "$ref": "./common.json#/$defs/Rfc3339DateTime" },
+        "displayNameOverride": { "type": "string", "description": "The caller's group-scoped display name, if set (§5.7)." }
+      }
+    },
+    "GroupPointer": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["group", "updatedAt"],
+      "description": "An entry in the user's group list at their home provider (§5.7, My groups): a group the provider hosts and the user belongs to, or a pointer the user's client recorded for a remote group.",
+      "properties": {
+        "group": {
+          "$ref": "./common.json#/$defs/HttpsUri",
+          "description": "The group's object URI, https://{authority}/api/groups/{groupId}, with a canonical authority (§2.2)."
+        },
+        "role": {
+          "$ref": "#/$defs/Role",
+          "description": "For a group the home provider hosts, the user's current role. For a remote group, a client-recorded hint that MAY be stale or absent; the authority is Group.membership at the group's provider (§5.5)."
+        },
+        "updatedAt": { "$ref": "./common.json#/$defs/Rfc3339DateTime" }
       }
     },
     "JoinRequest": {

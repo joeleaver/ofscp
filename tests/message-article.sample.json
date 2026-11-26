@@ -1,0 +1,32 @@
+{
+  "id": "msg_3",
+  "author": "jane@a.com",
+  "type": "article",
+  "title": "Welcome to the guild",
+  "summary": "Who we are, how the channels work, and where to start.",
+  "cover": "att_1",
+  "content": {
+    "text": "We started this group to...\n\n![The first meetup](attachment:att_2)\n\nThanks to @bob@b.com for the photos.",
+    "mime": "text/markdown"
+  },
+  "attachments": [
+    {
+      "id": "att_1",
+      "mime": "image/png",
+      "url": "https://cdn.a.com/m/3f9c2a7be1d04c8f9a6b5e2d1c0f4a87/diagram.png",
+      "size": 2048
+    },
+    {
+      "id": "att_2",
+      "mime": "image/jpeg",
+      "url": "https://cdn.a.com/m/91d0e6b4a8c2437f85e1b3d9c6a0f2e7/meetup.jpg",
+      "size": 40960,
+      "width": 1600,
+      "height": 1200
+    }
+  ],
+  "mentions": ["bob@b.com"],
+  "tags": ["#intro"],
+  "createdAt": "2025-03-01T12:00:00Z",
+  "metadata": []
+}

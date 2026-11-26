@@ -5,6 +5,7 @@
   "type": "object",
   "$defs": {
     "Content": {
+      "description": "A message body (§5.3, Content formats). Every provider accepts text/plain and text/markdown (CommonMark; raw HTML is shown as text); text/html is optional and rendered only through the §5.3 allow-list sanitizer. A body places the message's own attachments inline with attachment:<id> references.",
       "type": "object",
       "additionalProperties": true,
       "required": ["text", "mime"],
@@ -63,9 +64,70 @@
           "type": "array",
           "items": { "type": "string" }
         },
+        "mentions": {
+          "type": "array",
+          "items": { "$ref": "./identity.json#/$defs/UserRef" },
+          "description": "Actors the message mentions, set by the author's client (§5.3). When present it is authoritative for mention notifications (§10.1); when absent, mentions are parsed from the text."
+        },
+        "title": {
+          "type": "string",
+          "description": "Article title, plain text (§5.3). Defined only for type article; ignored on other types. When absent, the body's first level-1 heading is the title."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Article summary, plain text (§5.3). Defined only for type article; ignored on other types."
+        },
+        "cover": {
+          "$ref": "./common.json#/$defs/LocalId",
+          "description": "Article cover: the id of one of the message's own attachments, which SHOULD be image/* (§5.3). Defined only for type article; ignored on other types."
+        },
         "metadata": {
           "$ref": "./objects.json#/$defs/MetadataList",
           "description": "Metadata objects (§5.4); omitted means []."
+        }
+      }
+    },
+    "MessageUpdate": {
+      "description": "Body of an edit (§7.1): the data of the WS message.update command (which adds groupId, channelId and messageId) and the body of PATCH .../messages/{messageId}. Each field present replaces the stored value; absent fields are unchanged; at least one is required. type, reference and metadata cannot be edited.",
+      "type": "object",
+      "additionalProperties": true,
+      "anyOf": [
+        { "required": ["content"] },
+        { "required": ["attachments"] },
+        { "required": ["tags"] },
+        { "required": ["mentions"] },
+        { "required": ["title"] },
+        { "required": ["summary"] },
+        { "required": ["cover"] }
+      ],
+      "properties": {
+        "content": { "$ref": "#/$defs/Content" },
+        "attachments": {
+          "type": "array",
+          "items": { "$ref": "./objects.json#/$defs/Attachment" },
+          "description": "Replaces the attachments array in full; checked as on create (§5.8)."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Replaces the tags array in full."
+        },
+        "mentions": {
+          "type": "array",
+          "items": { "$ref": "./identity.json#/$defs/UserRef" },
+          "description": "Replaces the mentions array in full (§5.3)."
+        },
+        "title": {
+          "type": ["string", "null"],
+          "description": "Article title (§5.3); null removes it. Ignored on other types."
+        },
+        "summary": {
+          "type": ["string", "null"],
+          "description": "Article summary (§5.3); null removes it. Ignored on other types."
+        },
+        "cover": {
+          "oneOf": [{ "$ref": "./common.json#/$defs/LocalId" }, { "type": "null" }],
+          "description": "Article cover attachment id (§5.3); null removes it. It MUST name one of the message's attachments after the edit. Ignored on other types."
         }
       }
     },
@@ -91,6 +153,23 @@
         "tags": {
           "type": "array",
           "items": { "type": "string" }
+        },
+        "mentions": {
+          "type": "array",
+          "items": { "$ref": "./identity.json#/$defs/UserRef" },
+          "description": "Actors the message mentions, set by the author's client (§5.3). When present it is authoritative for mention notifications (§10.1); when absent, mentions are parsed from the text."
+        },
+        "title": {
+          "type": "string",
+          "description": "Article title, plain text (§5.3). Defined only for type article; ignored on other types. When absent, the body's first level-1 heading is the title."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Article summary, plain text (§5.3). Defined only for type article; ignored on other types."
+        },
+        "cover": {
+          "$ref": "./common.json#/$defs/LocalId",
+          "description": "Article cover: the id of one of the message's own attachments, which SHOULD be image/* (§5.3). Defined only for type article; ignored on other types."
         },
         "replyCount": {
           "type": "integer",

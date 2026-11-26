@@ -1,0 +1,20 @@
+{
+  "id": "att_7",
+  "mime": "video/mp4",
+  "url": "https://cdn.a.com/m/0c4e9b21d7f84a3b96e5d8a1c2b3f405/launch.mp4",
+  "size": 7340032,
+  "filename": "launch.mp4",
+  "hash": "sha-256:lM5wV9nNecJWRxD00VQHYaJh306PJYnMLpf7wq7jueg=",
+  "width": 1920,
+  "height": 1080,
+  "durationMs": 42000,
+  "expiresAt": "2026-01-01T13:00:00Z",
+  "thumbnail": {
+    "id": "att_8",
+    "mime": "image/jpeg",
+    "url": "https://cdn.a.com/m/6a1f3d58e2b94c07a8d4f1e6b9c2d370/poster.jpg",
+    "size": 51200,
+    "width": 1920,
+    "height": 1080
+  }
+}

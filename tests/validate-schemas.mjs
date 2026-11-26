@@ -62,6 +62,7 @@ async function main() {
     ['tests/presence.sample.json', 'schemas/v0.1/presence.json'],
     ['tests/privacy-settings.sample.json', 'schemas/v0.1/privacy-settings.json'],
     ['tests/group.sample.json', 'schemas/v0.1/group.json'],
+    ['tests/group-membership.sample.json', 'schemas/v0.1/group.json'],
     ['tests/channel.sample.json', 'schemas/v0.1/channel.json'],
     ['tests/group-create-request.sample.json', 'schemas/v0.1/group-create-request.json'],
     ['tests/group-update-request.sample.json', 'schemas/v0.1/group-update-request.json'],
@@ -73,9 +74,12 @@ async function main() {
     ['tests/member.sample.json', 'schemas/v0.1/member.json'],
     ['tests/join-request.sample.json', 'schemas/v0.1/join-request.json'],
     ['tests/message.sample.json', 'schemas/v0.1/message.json'],
+    ['tests/message-article.sample.json', 'schemas/v0.1/message.json'],
     ['tests/message-create-request.sample.json', 'schemas/v0.1/message-create-request.json'],
     ['tests/message-update-request.sample.json', 'schemas/v0.1/message-update-request.json'],
+    ['tests/message-update-article-request.sample.json', 'schemas/v0.1/message-update-request.json'],
     ['tests/attachment.sample.json', 'schemas/v0.1/attachment.json'],
+    ['tests/attachment-video.sample.json', 'schemas/v0.1/attachment.json'],
     ['tests/reaction.sample.json', 'schemas/v0.1/reaction.json'],
     ['tests/messages-page.sample.json', 'schemas/v0.1/messages-page.json'],
     ['tests/problem-details.sample.json', 'schemas/v0.1/problem-details.json'],
@@ -98,6 +102,12 @@ async function main() {
     ['tests/follow.sample.json', 'schemas/v0.1/follow.json'],
     ['tests/follow-create-request.sample.json', 'schemas/v0.1/follow-create-request.json'],
     ['tests/follows-response.sample.json', 'schemas/v0.1/follows-response.json'],
+
+    // Group list & membership pointers (§5.7)
+    ['tests/group-pointer.sample.json', 'schemas/v0.1/group-pointer.json'],
+    ['tests/group-pointer-request.sample.json', 'schemas/v0.1/group-pointer-request.json'],
+    ['tests/group-pointers-response.sample.json', 'schemas/v0.1/group-pointers-response.json'],
+    ['tests/ws-groups-updated.sample.json', 'schemas/v0.1/ws/groups-updated.json'],
 
     // Cross-provider discovery (§8.6, §11.2)
     ['tests/providers-response.sample.json', 'schemas/v0.1/providers-response.json'],
@@ -128,6 +138,7 @@ async function main() {
     ['tests/ws-unsubscribed-revoked.sample.json', 'schemas/v0.1/ws/unsubscribed.json'],
     ['tests/ws-message-create.sample.json', 'schemas/v0.1/ws/message-create.json'],
     ['tests/ws-message-update.sample.json', 'schemas/v0.1/ws/message-update.json'],
+    ['tests/ws-message-update-article.sample.json', 'schemas/v0.1/ws/message-update.json'],
     ['tests/ws-message-delete.sample.json', 'schemas/v0.1/ws/message-delete.json'],
     ['tests/ws-message-created.sample.json', 'schemas/v0.1/ws/message-created.json'],
     ['tests/ws-message-updated.sample.json', 'schemas/v0.1/ws/message-updated.json'],

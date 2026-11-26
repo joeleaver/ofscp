@@ -37,7 +37,15 @@
         },
         "width": { "type": "integer", "minimum": 0, "description": "Pixel width for image/video." },
         "height": { "type": "integer", "minimum": 0, "description": "Pixel height for image/video." },
-        "durationMs": { "type": "integer", "minimum": 0, "description": "Duration in milliseconds for audio/video." }
+        "durationMs": { "type": "integer", "minimum": 0, "description": "Duration in milliseconds for audio/video." },
+        "thumbnail": {
+          "$ref": "#/$defs/Attachment",
+          "description": "Optional preview image (image/*), e.g. a video's poster frame (§5.8). Set at upload by the provider or from the uploader's thumbnail part. A thumbnail MUST NOT itself carry a thumbnail."
+        },
+        "expiresAt": {
+          "$ref": "./common.json#/$defs/Rfc3339DateTime",
+          "description": "When a short-lived url stops working (§5.8, Revocation). Absent = the url does not expire. Clients refresh it by re-reading the message."
+        }
       }
     }
   }
