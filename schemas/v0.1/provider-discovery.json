@@ -75,10 +75,7 @@
                   "Ed25519"
                 ]
               },
-              "public_key": {
-                "type": "string",
-                "minLength": 1
-              },
+              "public_key": { "$ref": "./defs/common.json#/$defs/Ed25519PublicKey" },
               "created_at": {
                 "$ref": "./defs/common.json#/$defs/Rfc3339DateTime"
               }

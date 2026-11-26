@@ -86,6 +86,7 @@ Ids are stable for the lifetime of the object and **MUST NOT** be reused for a d
 * Timestamps **MUST** be RFC 3339 / ISO-8601 strings with timezone (UTC recommended), e.g. `2025-03-01T12:00:00Z`.
 * `mime` values **MUST** be valid IANA media types.
 * Pagination cursors **MUST** be treated as opaque strings.
+* **base64** in this specification means the standard alphabet of RFC 4648 §4 **with** `=` padding, unless a field says **base64url** (RFC 4648 §5).
 * Field names are **camelCase**, with one deliberate exception: the authentication and key payloads of §4 — the bootstrap response (`bootstrap_token`, `token_type`, `expires_in`), device-key registration and listing (`public_key`, `algorithm`, `device_name`, `key_id`, `created_at`), the keys endpoint (`cache_until`), and `provider.publicKeys` entries in discovery — use **snake_case**, matching OAuth conventions. Implementations **MUST** use the names exactly as specified and **MUST NOT** rely on peers accepting the other casing. (The WebSocket `authenticate` command, §7.1, is camelCase: `keyId`.)
 
 Providers **SHOULD** define maximum payload sizes (request and response) and return **413** when exceeded.
@@ -337,7 +338,7 @@ Upon successful registration or login, the client registers a device key. **All 
 Providers MUST store for each device key:
 - `key_id`: Unique identifier (provider-generated)
 - `user_handle`: Associated user handle
-- `public_key`: Ed25519 public key (base64)
+- `public_key`: Ed25519 public key: the **raw 32-byte** public key of RFC 8032 (not a DER `SubjectPublicKeyInfo`, RFC 8410), base64-encoded (§2.5), so exactly 44 characters. This one encoding is used everywhere a `public_key` appears — device-key registration (§4.3.1), guest creation (§4.8), device-key listing, the keys endpoint (§4.6) and `provider.publicKeys` in discovery (§3.1). A provider **MUST** reject with `400` a registration whose `public_key` does not decode to exactly 32 bytes; a verifier **MUST** treat a published key that does not as unusable (no request verifies against it).
 - `algorithm`: Key algorithm (see §4.3.3)
 - `device_name`: Human-readable device description
 - `created_at`: Registration timestamp
@@ -2435,6 +2436,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Support password-based login, and registration according to the advertised registration mode (§4.1.1)
 - [ ] Issue scoped, short-lived bootstrap tokens on registration/login (§4.2)
 - [ ] Implement device key registration (bootstrap-authenticated), listing, and revocation, closing revoked keys' WebSocket connections with `4003` (§4.7)
+- [ ] Encode every `public_key` as the raw 32-byte Ed25519 key in padded standard base64, and reject (`400`) a registration whose key does not decode to 32 bytes (§4.3.2)
 - [ ] Validate Ed25519 request signatures over the §4.4.2 canonical string, including authority binding and nonce replay rejection, with one bounded provider-wide replay store that records a nonce only after the signature verifies (§4.5)
 - [ ] Apply the outbound-request rules (https only, public addresses only, no redirects) to every request to a host named by someone else (§8)
 - [ ] Apply federation allow/deny policy to every outbound request and to every signed inbound request (`403` at the start of §4.5 step 6 or §8.1 step 2, before any key or discovery fetch; WebSocket `4001`); answer unsigned requests to public endpoints regardless (§8)
