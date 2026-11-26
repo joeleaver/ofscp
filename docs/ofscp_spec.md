@@ -1590,7 +1590,7 @@ Order of checks. The provider handles a create in this order and stops at the fi
 4. **Duplicate lookup:** if `(author, channelId, clientMessageId)` matches an existing message, the provider answers with it (below) and applies none of the remaining checks.
 5. **Everything else**, for a new message only: the `400` rules above, including the parent check, and then `replyOnlyTo`, which needs the parent: `400` or `403`.
 
-So a retry of a successful create gets the existing message even if its parent has since been reaped. Steps 1–3 still apply to the retry as sent: an actor who can no longer see the channel, or no longer holds the permission for the request's `type`, is refused, as is a retry whose `type` or `reference` presence differs from the original in a way step 3 rejects. Clients **SHOULD** retry with the original body unchanged.
+So a retry of a successful create gets the existing message even if its parent has since been reaped. Steps 1–3 still apply to the retry as sent: an actor who can no longer see the channel, or no longer holds the permission for the request's `type`, is refused, as is a retry that step 3 would reject on its own, for example a reply-restricted actor's retry sent without the `reference`. Step 3 judges the request as sent and does not compare it with the stored message. Clients **SHOULD** retry with the original body unchanged.
 
 Idempotency:
 
