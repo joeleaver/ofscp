@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/ofscp/schemas/v0.1/dm-message-create-request.json",
   "title": "OFSCP DM Message Create Request (v0.1)",
-  "description": "Body of POST /api/federation/dms/{dmId}/messages (§8.3): a single DM delivered by the sender's client to the recipient's home provider. The provider MUST reject the request when {dmId} does not equal the id derived from {sender, recipient} (§7.4).",
+  "description": "Body of POST /api/federation/dms/{dmId}/messages (§8.3): a single DM delivered by the sender's client to the recipient's home provider. The provider MUST reject the request when {dmId} does not equal the id derived from {sender, recipient} (§7.4). The body has no type field: a type it carries is ignored, and the stored message has type message.",
   "type": "object",
   "additionalProperties": true,
   "required": ["clientMessageId", "content"],

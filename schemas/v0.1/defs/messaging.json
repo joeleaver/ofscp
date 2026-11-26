@@ -53,8 +53,11 @@
           "description": "Attachments as returned by POST /api/media (§5.8); omitted means []."
         },
         "reference": {
-          "$ref": "#/$defs/MessageReference",
-          "description": "A reply's parent (§7.2): type reply, and the id of a message in the same channel."
+          "allOf": [
+            { "$ref": "#/$defs/MessageReference" },
+            { "properties": { "type": { "const": "reply" } } }
+          ],
+          "description": "A reply's parent (§7.2): type MUST be reply (anything else is 400), and id MUST name a message in the same channel. Only such a valid reply satisfies replyOnly / replyOnlyTo (§5.2.1)."
         },
         "tags": {
           "type": "array",
@@ -75,7 +78,7 @@
         "clientMessageId": {
           "type": "string",
           "minLength": 1,
-          "description": "Echo of the clientMessageId the create carried (§7.1, §7.4). It MUST be present on the author's copy of message.created and on the response to a create, first or duplicate; elsewhere a provider MAY include or omit it."
+          "description": "Echo of the clientMessageId the create carried (§7.1, §7.4). It MUST be present on the author's copies of message.created, live or replayed by subscribe.since, and on the response to a create, first or duplicate; elsewhere a provider MAY include or omit it."
         },
         "author": { "$ref": "./identity.json#/$defs/UserRef" },
         "type": { "type": "string", "enum": ["message", "memo", "article"] },
