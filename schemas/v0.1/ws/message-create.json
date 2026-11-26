@@ -4,7 +4,7 @@
   "title": "OFSCP WS message.create command (v0.1)",
   "description": "Creates a message of any type (§7.1). data is the MessageCreate body (shared with POST /api/groups/{groupId}/channels/{channelId}/messages) plus groupId and channelId.",
   "allOf": [
-    { "$ref": "./envelope.json" },
+    { "$ref": "./command-envelope.json" },
     {
       "type": "object",
       "required": ["type", "data"],

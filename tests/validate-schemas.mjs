@@ -161,6 +161,10 @@ async function main() {
     ['tests/ws-ping.sample.json', 'schemas/v0.1/ws/ping.json'],
     ['tests/ws-pong.sample.json', 'schemas/v0.1/ws/pong.json'],
     ['tests/ws-error.sample.json', 'schemas/v0.1/ws/error.json'],
+    // §7.1 partial subscribe: the refused channel ids ride in details.channels.
+    ['tests/ws-error-subscribe-partial.sample.json', 'schemas/v0.1/ws/error.json'],
+    // §7.1 envelope: a command's `ts` is optional and its value ignored.
+    ['tests/ws-command-ts-ignored.sample.json', 'schemas/v0.1/ws/typing-stop.json'],
 
     // Authentication & Device Keys
     ['tests/auth-registration-request.sample.json', 'schemas/v0.1/auth-registration-request.json'],
@@ -211,6 +215,12 @@ async function main() {
   const rejectCases = [
     // §6.4 / §7.5: `offline` is connection-derived, never settable.
     ['tests/presence-update-request.offline.invalid.json', 'schemas/v0.1/presence-update-request.json'],
+    // §7.1 envelope: `ts` is required on server→client events,
+    ['tests/ws-subscribed.no-ts.invalid.json', 'schemas/v0.1/ws/subscribed.json'],
+    // `id` on every command,
+    ['tests/ws-subscribe.no-id.invalid.json', 'schemas/v0.1/ws/subscribe.json'],
+    // and `data` is always an object.
+    ['tests/ws-ping.data-not-object.invalid.json', 'schemas/v0.1/ws/ping.json'],
     // §4.3.2: `public_key` is the raw 32-byte key, not a DER SubjectPublicKeyInfo.
     ['tests/device-key-registration.spki.invalid.json', 'schemas/v0.1/device-key-registration.json']
   ];

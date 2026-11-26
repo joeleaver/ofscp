@@ -1,0 +1,6 @@
+{
+  "type": "subscribe",
+  "data": {
+    "channels": ["chn_general"]
+  }
+}

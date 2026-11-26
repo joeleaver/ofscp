@@ -3,7 +3,7 @@
   "$id": "https://example.invalid/ofscp/schemas/v0.1/ws/presence-subscribe.json",
   "title": "OFSCP WS presence.subscribe command (v0.1)",
   "allOf": [
-    { "$ref": "./envelope.json" },
+    { "$ref": "./command-envelope.json" },
     {
       "type": "object",
       "required": ["type", "data"],

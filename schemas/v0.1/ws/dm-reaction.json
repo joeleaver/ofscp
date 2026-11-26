@@ -4,7 +4,7 @@
   "title": "OFSCP WS dm.reaction event (v0.1)",
   "description": "Emitted to a DM conversation's subscribers when a reaction is added to or removed from a DM message stored in the recipient's inbox (§7.4). DM-scoped mirror of reaction.added/reaction.removed: `state` is `added` (carries the full `reaction`) or `removed` (carries `key`+`author`).",
   "allOf": [
-    { "$ref": "./envelope.json" },
+    { "$ref": "./event-envelope.json" },
     {
       "type": "object",
       "required": ["type", "data"],

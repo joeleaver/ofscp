@@ -1,7 +1,6 @@
 {
   "id": "cli_a1",
   "type": "authenticate",
-  "ts": "2026-01-01T12:00:01Z",
   "data": {
     "actor": "alice@providera.com",
     "keyId": "dk_abc123xyz",

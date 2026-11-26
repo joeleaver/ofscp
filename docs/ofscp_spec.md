@@ -72,7 +72,7 @@ A handle **MUST** match `^[a-z0-9_-]{3,32}$`. Providers **MUST** reject (not sil
 To enable evolution without breaking interoperability:
 
 * Clients and providers **MUST** ignore unknown JSON object fields.
-* Clients and providers **MUST** ignore unknown event types.
+* Clients and providers **MUST** ignore unknown event types. For a provider this covers WebSocket client commands (§7.1) whose `type` is not a standard one: once the connection is authenticated, it **MUST** ignore them. (Before authentication, any command other than `authenticate` closes the connection with `4001`, §7.1 *Authentication*.) A *standard* command it does not support is answered with an `error` instead (§7.1, *WebSocket message types*).
 * Unknown `message.type` values **MUST** be rendered as a generic “message” using best-effort content display.
 
 ### 2.4. Canonical identifiers
@@ -1508,9 +1508,14 @@ The WebSocket handshake itself is **not** signed: browsers cannot set arbitrary 
 
 Rules:
 
-* Until authenticated, providers **MUST** ignore (or reject) every command other than `authenticate`, and **MUST** close the connection if any other command is received first.
-* Providers **MUST** close the connection if no valid `authenticate` arrives within a short window (RECOMMENDED 10 seconds).
-* On authentication failure, providers **MUST** send an `error` event and then close with application close code `4001`.
+* Until authenticated, providers **MUST** ignore (or reject) every command other than `authenticate`, and **MUST** close the connection with `4001` if any other command is received first.
+* Providers **MUST** close the connection with `4001` if no valid `authenticate` arrives within a short window (RECOMMENDED 10 seconds).
+* On authentication failure, providers **MUST** send an `error` event and then close with application close code `4001`. An `authenticate` whose `data` is malformed is an authentication failure (`unauthorized` / `401`), not a `bad_request` that leaves the connection open. The event's `code` and `status` mirror the answer the same failure would get over REST (§4.5, §4.6, §7.3):
+  * `unauthorized` / `401` for a failed check — a bad signature, timestamp or challenge nonce, or no matching key — including a key fetch refused by the outbound-request rules (§8 *Outbound requests*) when no cached key matches.
+  * `forbidden` / `403` when federation policy denies the actor's provider (§8 *Authorization*).
+  * `service_unavailable` / `503` when the actor's keys could not be fetched — a fetch failure, or a re-fetch suppressed by the provider's own limit — and no cached key matches (§4.5 step 6, §4.6). The provider **SHOULD** include `details.retryAfter` (seconds) when it knows when a retry can succeed.
+
+  The close code is `4001` in every case, including `503`. Providers **MUST NOT** use `1013` for it: `4001` already tells the client its key was not revoked and that it **MAY** reconnect (*Close codes*).
 
 #### WebSocket message envelope
 
@@ -1528,10 +1533,13 @@ All client→server commands and server→client events **MUST** use this JSON e
 
 Rules:
 
-* `id` **MUST** be unique within a connection.
+* `id` is required on every command and event, and **MUST** be unique within a connection.
 * `type` **MUST** be a stable string.
-* `ts` **MUST** be an RFC3339 timestamp.
+* `ts` is required on every server→client event and **MUST** be an RFC3339 timestamp. On client→server commands it is optional: providers **MUST NOT** reject a command for lacking `ts`, and **MUST** ignore its value. (Client examples in this specification omit it.)
+* `data` **MUST** be an object for every standard command.
 * `correlationId` **SHOULD** be included in responses that correspond to a specific client request.
+
+A command without an `id` received after authentication is answered with an `error` (`bad_request`) with no `correlationId`, since there is nothing to correlate; before authentication it closes the connection with `4001` (*Authentication* above). Schemas: `ws/command-envelope.json` and `ws/event-envelope.json`, both built on `ws/envelope.json`; `ping` and `pong`, which either party sends, use the base envelope.
 
 Clients **MUST** ignore unknown fields.
 
@@ -1539,7 +1547,7 @@ Clients **MUST** ignore unknown fields.
 
 All WebSocket payloads **MUST** use the message envelope described above.
 
-The `type` field **MUST** be one of the following standardized strings.
+The standard `type` strings are the following; a `type` not listed here is handled per §2.3 and the rules below.
 
 ##### Client → Server command types
 
@@ -1596,6 +1604,8 @@ Rules:
 * Providers **MUST** implement all event types listed above that correspond to the commands they support.
   * Example: a provider that supports `message.create` **MUST** emit `message.created`.
 * Providers **MAY** emit additional `type` values; clients **MUST** ignore unknown types.
+* A command whose `type` is a standard command above that the provider does not support (or does not support yet) **MUST** be answered with an `error` (`bad_request`, `correlationId` = the command's `id`); silently ignoring it would leave the client waiting for a reply. A command of an unknown, non-standard `type` is ignored (§2.3).
+* A standard command other than `authenticate` whose `data` does not match its schema **MUST** be answered with an `error` (`bad_request`, `correlationId` = the command's `id`). A malformed `authenticate` is an authentication failure instead (*Authentication*).
 * For request/response style interactions (e.g. `subscribe`, `message.create`), providers **SHOULD** echo the client’s request `id` in `correlationId`.
 
 #### Subscriptions
@@ -1625,7 +1635,13 @@ Server → Client:
 }
 ```
 
-Providers **MUST** enforce authorization (effective read access, §11.3) at subscription-time and reject unauthorized subscriptions with an `error` event (§7.3). A channel the actor cannot read is rejected as one that does not exist (`not_found`, §11.3).
+Providers **MUST** enforce authorization (effective read access, §11.3) at subscription-time. A channel the actor cannot read is refused as one that does not exist (§11.3). When some listed channels are refused, the provider subscribes the readable ones and acknowledges with `subscribed` listing only those, then sends one `error` (`code` `not_found`, `status` `404`, `correlationId` = the command's `id`, the refused channel ids in `details.channels`) for all the refused ones. If no listed channel is readable it sends only the `error`, with no `subscribed`. (This parallels `presence.subscribe`, §7.5.)
+
+```json
+{ "id": "evt_101", "type": "error", "correlationId": "cli_001", "ts": "2026-01-01T12:00:00Z", "data": { "code": "not_found", "message": "No such channel", "status": 404, "details": { "channels": ["chn_missing"] } } }
+```
+
+**Subscription cap.** A `subscribe` is all-or-nothing against the per-connection subscription cap (*Delivery, ordering & limits*). If subscribing every readable listed channel the connection is not already subscribed to would exceed the cap, the provider subscribes none of them and answers with a single `error` (`subscription_limit`, `409`, `correlationId` = the command's `id`): no `subscribed`, and no `not_found` for refused channels. Only readable channels count towards the cap, so the limit error reveals nothing about channels the actor cannot read.
 
 Unsubscribe:
 ```json
@@ -1650,7 +1666,7 @@ Authorization is not checked only once. When a change removes a subscribed actor
 
 | Code | Meaning |
 | --- | --- |
-| `4001` | Authentication failed, the actor/provider is refused by federation policy (§8), or the connection's key can no longer be confirmed (§7.1: its cache entry expired without a successful re-fetch). In that last case the key was not revoked, and the client **MAY** reconnect and re-authenticate later. |
+| `4001` | Authentication failed (including the authentication timeout and a command other than `authenticate` received before authentication), the actor/provider is refused by federation policy (§8), or the connection's key can no longer be confirmed (§7.1: its cache entry expired without a successful re-fetch). In that last case the key was not revoked, and the client **MAY** reconnect and re-authenticate later. |
 | `4003` | The connection's credentials were revoked: its device key was revoked (§4.7), or the account it authenticated as no longer exists (e.g. a guest account was claimed or merged, §4.8). The client **MUST NOT** reconnect with the same key. |
 
 A provider **MUST** close every connection authenticated with a device key, with `4003`, when that key is revoked.
@@ -1663,6 +1679,16 @@ For a connection from a **remote** actor, the provider holds the actor's keys un
 * **Federation policy → `4001`.** If the actor's provider becomes denied by federation policy, the provider **MUST** close with `4001` at once, whatever its cache holds (§4.6).
 
 `4001` here tells the client its key was never revoked, so it must not retire it; `4003` is reserved for revocation.
+
+`4001` and `4003` **MUST NOT** be used for any reason other than those in the table. Other closes **SHOULD** use the RFC 6455 codes:
+
+* `1000` — heartbeat or idle timeout (*Heartbeat & liveness*).
+* `1001` — provider shutdown or restart.
+* `1008` — a policy violation, such as repeated abuse of the command rate limit.
+* `1009` — a frame over the provider's size limit. Over WebSocket this close replaces the REST `413` (§2.5); the provider **MAY** first send an `error` (`payload_too_large`).
+* `1013` — a per-actor connection cap, or an outbound queue overflow from a slow consumer. The provider first sends an `error` (`too_many_requests`, with `details.retryAfter` in seconds when known). A connection cap is checked once `authenticate` has succeeded: the provider sends that `error` in place of `authenticated`, then closes.
+
+The authentication timeout and a command other than `authenticate` before authentication close with `4001` (*Authentication*).
 
 #### Resuming after a disconnect
 
@@ -1867,7 +1893,7 @@ Typing indicators are soft state. A provider **MUST** auto-expire a `start` afte
 
 #### Heartbeat & liveness
 
-Either party **MAY** send a `ping`; the receiver **MUST** reply with `pong`, echoing the ping's `id` in `correlationId`. Providers **SHOULD** send a `ping` periodically (RECOMMENDED every 30 seconds) and **SHOULD** close a connection that has produced no traffic or `pong` within a timeout (RECOMMENDED 60 seconds). This is an application-level heartbeat and does not rely on WebSocket protocol ping/pong frames, which many browser clients cannot observe.
+Either party **MAY** send a `ping`; the receiver **MUST** reply with `pong`, echoing the ping's `id` in `correlationId`. Providers **SHOULD** send a `ping` periodically (RECOMMENDED every 30 seconds) and **SHOULD** close a connection that has produced no traffic or `pong` within a timeout (RECOMMENDED 60 seconds), with close code `1000` (*Close codes*). This is an application-level heartbeat and does not rely on WebSocket protocol ping/pong frames, which many browser clients cannot observe.
 
 ```json
 { "id": "cli_400", "type": "ping", "data": {} }
@@ -1878,7 +1904,7 @@ Either party **MAY** send a `ping`; the receiver **MUST** reply with `pong`, ech
 
 * **Ordering:** within a single channel, providers **MUST** deliver timeline events in an order consistent with their `cursor` values (monotonically non-decreasing). No ordering is guaranteed across different channels. The `message.created` answering a duplicate create carries no `cursor` and is not a timeline event, so this rule does not apply to it (see *Idempotency* above).
 * **Delivery:** delivery is **at-least-once**. Combined with resume (replay may re-send the boundary event) a client **MAY** see a duplicate, so clients **MUST** de-duplicate by message `id`. The `(author, channelId, clientMessageId)` idempotency rule above prevents duplicate *creation*.
-* **Limits:** providers **MAY** cap the number of subscriptions and the command rate per connection. On exceeding a limit a provider **SHOULD** reply with an `error` (`code: "too_many_requests"` for the command rate, `code: "subscription_limit"` for the subscription cap; §7.3) and **MAY** close the connection.
+* **Limits:** providers **MAY** cap the number of subscriptions and the command rate per connection. On exceeding a limit a provider **SHOULD** reply with an `error` (`code: "too_many_requests"` for the command rate, `code: "subscription_limit"` for the subscription cap, applied to `subscribe` as described under *Subscriptions*; §7.3) and **MAY** close the connection (`1008` for repeated abuse, *Close codes*).
 
 ### 7.2. Reading
 
@@ -2152,17 +2178,17 @@ Presence (§6.4: `availability` ∈ `online`/`away`/`dnd`/`offline`, plus `statu
 A client subscribes to a set of users' presence with `presence.subscribe`:
 
 ```json
-{ "id": "cli_600", "type": "presence.subscribe", "ts": "2026-02-01T10:00:00Z", "data": { "users": ["bob@b.com", "carol@c.com"] } }
+{ "id": "cli_600", "type": "presence.subscribe", "data": { "users": ["bob@b.com", "carol@c.com"] } }
 ```
 
-The provider acknowledges with `presence.subscribed` and **SHOULD** immediately follow with an initial `presence.update` snapshot for each subscribed user, so the client renders current state without a separate REST read. `presence.unsubscribe` (acked by `presence.unsubscribed`) stops updates for the listed users. Presence subscriptions are connection-scoped, like channel subscriptions (§7.1). A listed user the provider does not host, or an unknown, disabled or invalid local handle — the subjects `GET /api/users/{userRef}/presence` answers `404` (§6.1) — is left out of `presence.subscribed` and gets no updates; the provider answers one `error` (`code` `not_found`, the command's `id` in `correlationId`, the refused users in `details.users`) for all of them. The remaining users are subscribed as usual.
+The provider acknowledges with `presence.subscribed` and **SHOULD** immediately follow with an initial `presence.update` snapshot for each subscribed user, so the client renders current state without a separate REST read. `presence.unsubscribe` (acked by `presence.unsubscribed`) stops updates for the listed users. Presence subscriptions are connection-scoped, like channel subscriptions (§7.1). A listed user the provider does not host, or an unknown, disabled or invalid local handle — the subjects `GET /api/users/{userRef}/presence` answers `404` (§6.1) — is left out of `presence.subscribed` and gets no updates. The remaining users are subscribed as usual and acknowledged with `presence.subscribed` listing only them; the provider then sends one `error` (`code` `not_found`, `status` `404`, `correlationId` = the command's `id`, the refused users in `details.users`) for all the refused ones. If no listed user remains it sends only the `error`, with no `presence.subscribed`. (This parallels channel `subscribe`, §7.1.)
 
 #### Setting your presence
 
 A connected client sets its own presence with `presence.set`, equivalent to `PUT /api/me/presence` (§6.4) and updating the same stored value:
 
 ```json
-{ "id": "cli_602", "type": "presence.set", "ts": "2026-02-01T10:10:00Z", "data": { "availability": "dnd", "status": "In a meeting" } }
+{ "id": "cli_602", "type": "presence.set", "data": { "availability": "dnd", "status": "In a meeting" } }
 ```
 
 Like `PUT /api/me/presence`, it is a **full replace**: an absent `status` clears it (§6.4). `offline` is **not** a settable value — it is derived from connection liveness (below) — and is rejected with an `error` (`bad_request`).
@@ -2333,7 +2359,7 @@ A provider advertises support with `capabilities.federation.realtimeDelivery: "d
 1. **Join first.** The remote user **MUST** already be a member of the channel, having joined via `POST /api/groups/{groupId}/channels/{channelId}/join` on the home provider (§8.2). Membership and channel/group tier (§8 Authorization) are what authorize real-time access; subscribing does **not** implicitly join.
 2. **Connect.** The remote client opens a WebSocket to the channel's home provider at `wss://{homeProviderDomain}/api/ws` (§7.1) — *not* to its own home provider.
 3. **Authenticate.** The client completes the signed-challenge handshake of §7.1 using its device key. Because the actor is remote, the home provider resolves the actor's public keys from the actor's home provider via the keys endpoint (§4.6), then verifies the `authenticate` signature normally. Key caching, rotation, and re-fetch-on-failure follow §4.6.
-4. **Subscribe.** The client sends `subscribe` with the channel id(s). The provider enforces membership + tier at subscription-time (§7.1) and rejects unauthorized subscriptions with an `error`: `not_found` for a channel the actor cannot read (§11.3), as for one that does not exist. Resume (`since` cursors) and the `ping`/`pong` heartbeat work identically to the local case.
+4. **Subscribe.** The client sends `subscribe` with the channel id(s). The provider enforces membership + tier at subscription-time (§7.1): it subscribes the readable channels and refuses the rest with one `error` (`not_found`, the refused ids in `details.channels`), treating a channel the actor cannot read as one that does not exist (§11.3). Resume (`since` cursors) and the `ping`/`pong` heartbeat work identically to the local case.
 
 #### Edit & delete propagation
 
@@ -2618,7 +2644,9 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Apply the outbound-request rules (https only, public addresses only, no redirects) to every request to a host named by someone else (§8)
 - [ ] Apply federation allow/deny policy to every outbound request and to every signed inbound request (`403` at the start of §4.5 step 6 or §8.1 step 2, before any key or discovery fetch; WebSocket `4001`); answer unsigned requests to public endpoints regardless (§8)
 - [ ] Allow cross-origin access per §3.4 (CORS preflight and headers; no `Origin` check on WebSocket upgrades) on every endpoint in §3.4's scope (standard endpoints, `/.well-known/ofscp…`, attachment and pre-signed upload URLs); non-standard ambient-credential endpoints SHOULD stay same-origin
-- [ ] Authenticate WebSocket connections via the signed `auth.challenge`/`authenticate` handshake (§7.1)
+- [ ] Authenticate WebSocket connections via the signed `auth.challenge`/`authenticate` handshake (§7.1), answering a failure with an `error` whose `code`/`status` mirror the REST answer (`401`; `403` for federation policy; `503` when the keys could not be fetched) and then close code `4001`, never `1013`
+- [ ] Follow the WebSocket envelope and command rules (§7.1): accept commands without `ts` and ignore its value; answer a missing `id` (after authentication), malformed `data` (other than in `authenticate`, which fails authentication) or a standard command the provider does not support with `error` `bad_request`; ignore unknown non-standard command types (§2.3); use `4001`/`4003` only for the reasons in the close-code table
+- [ ] Subscribe the readable channels of a partially refused `subscribe` and refuse the rest with one `not_found` `error` naming them in `details.channels` (only the `error` when none is readable); refuse a `subscribe` that would exceed the subscription cap as a whole with `subscription_limit` (§7.1)
 - [ ] Serve user public keys via the `/.well-known/ofscp/users/{handle}/keys` endpoint (`200` + `keys: []` for any well-formed unknown, disabled or keyless handle, §4.6)
 - [ ] Re-fetch keys or discovery on an unknown `key_id` before rejecting; answer `503`, not `401`, when they cannot be fetched (§4.6, §8.1)
 - [ ] Reject a keys response whose `actor` is not the requested actor, and a discovery document whose `provider.domain` is not the authority it was fetched from (§3.1, §4.6); answer `403` for a denied signer and `401` when the outbound-request rules forbid the fetch (§4.6, §8)

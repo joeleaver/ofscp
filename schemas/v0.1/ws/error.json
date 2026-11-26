@@ -4,7 +4,7 @@
   "title": "OFSCP WS error event (v0.1)",
   "allOf": [
     {
-      "$ref": "./envelope.json"
+      "$ref": "./event-envelope.json"
     },
     {
       "type": "object",

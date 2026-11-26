@@ -4,7 +4,7 @@
   "title": "OFSCP WS dm.message event (v0.1)",
   "description": "Emitted to a recipient subscribed to a DM conversation when a message is delivered to their inbox (§7.4). Only the recipient receives it, since only their inbox stores the message.",
   "allOf": [
-    { "$ref": "./envelope.json" },
+    { "$ref": "./event-envelope.json" },
     {
       "type": "object",
       "required": ["type", "data"],
