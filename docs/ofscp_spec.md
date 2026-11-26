@@ -1577,9 +1577,9 @@ A memo with an image, then a reply to it, are created the same way:
 Rules (both transports):
 
 * The provider sets `id`, `author` (the authenticated actor), `createdAt` and `permissions`, and stores `type`, `content`, `attachments`, `reference`, `tags` and `metadata` as given, with the defaults above. The stored message is a `BaseMessage` (§5.3).
-* The provider **MUST** reject with **`404`** (`not_found`) a create in a group or channel that does not exist, or in a channel the actor cannot read (effective read access, §11.3). The two cases get the same answer, so a create never reveals that a channel the actor cannot see exists (§5.2.1, §7.3).
+* The provider **MUST** reject with **`404`** (`not_found`) a create in a group or channel that does not exist, or in a channel the actor cannot read (effective read access, §11.3). The two cases get the same answer: a create is answered as for a missing channel (§5.2.1, §7.3). (Other read paths, such as `GET` of a channel and `subscribe`, keep their own error codes.)
 * The provider **MUST** reject with **`403`** (`forbidden`) a create the actor may not make: one whose `type` the channel's `post:<type>` permission does not grant, or, when the actor is reply-restricted, one without a `reference` or one whose parent's `type` `replyOnlyTo` does not list (§5.2.1).
-* The provider **MUST** reject with **`400`** (`bad_request`) a body that does not match the schema, an unknown `type`, an invalid `Attachment` or metadata object, a `reference` whose `type` is not `"reply"`, or a `reference` whose `id` is not a message in the same channel (§7.2).
+* The provider **MUST** reject with **`400`** (`bad_request`) a body that does not match the schema, an invalid `Attachment` or metadata object, a `reference` whose `type` is not `"reply"`, or a `reference` whose `id` is not a message in the same channel (§7.2).
 * Over WebSocket, a rejection is an `error` event (§7.3) with the command's `id` in `correlationId`.
 
 Order of checks. The provider handles a create in this order and stops at the first step that answers:
@@ -1590,12 +1590,12 @@ Order of checks. The provider handles a create in this order and stops at the fi
 4. **Duplicate lookup:** if `(author, channelId, clientMessageId)` matches an existing message, the provider answers with it (below) and applies none of the remaining checks.
 5. **Everything else**, for a new message only: the `400` rules above, including the parent check, and then `replyOnlyTo`, which needs the parent: `400` or `403`.
 
-So a retry of a successful create always gets the existing message, even if its parent has since been reaped or the body was changed, while an actor who can no longer see the channel, or no longer holds the permission, is still refused.
+So a retry of a successful create gets the existing message even if its parent has since been reaped. Steps 1–3 still apply to the retry as sent: an actor who can no longer see the channel, or no longer holds the permission for the request's `type`, is refused, as is a retry whose `type` or `reference` presence differs from the original in a way step 3 rejects. Clients **SHOULD** retry with the original body unchanged.
 
 Idempotency:
 
 * Clients **SHOULD** set `clientMessageId`.
-* Providers **MUST** treat `(author, channelId, clientMessageId)` as idempotent. A create whose key matches an existing message creates nothing and fans out nothing: the provider returns the existing message as it now stands, whatever the rest of the body says.
+* Providers **MUST** treat `(author, channelId, clientMessageId)` as idempotent. A create whose key matches an existing message creates nothing and fans out nothing: the provider returns the existing message as it now stands; apart from steps 1–3 above, the rest of the retry's body is not checked or applied.
 * Over WebSocket the existing message goes only to the requesting connection, as a `message.created` with the command's `id` in `correlationId`. This copy **MUST NOT** carry a `cursor`: it is not a timeline event, so it is exempt from the ordering rule below, and clients **MUST NOT** store it as a resume point. Its `message` is the message as it now stands, which may be edited (`editedAt`) or a tombstone (`deletedAt`), so a client **MUST** match it to its pending send by `clientMessageId` (or `id`) and **MUST NOT** show it as a new message.
 * When the create carried a `clientMessageId`, the provider **MUST** include it in the message on the author's copies of `message.created` (on every connection of the author's that receives the event, including copies replayed to the author by `subscribe.since`) and in the response to the create, first or duplicate. Since the key is stored with the message, a replayed copy carries it like a live one. A provider **MAY** include it in other copies and in history.
 
