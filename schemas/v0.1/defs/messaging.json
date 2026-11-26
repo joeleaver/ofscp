@@ -29,12 +29,57 @@
         "editUntil": { "$ref": "./common.json#/$defs/Rfc3339DateTime" }
       }
     },
+    "MessageCreate": {
+      "description": "Body that creates a channel message (§7.1): the data of the WS message.create command (which adds groupId and channelId) and the body of POST /api/groups/{groupId}/channels/{channelId}/messages. The provider sets id, author, createdAt and permissions.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["content"],
+      "properties": {
+        "clientMessageId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Client-chosen idempotency key: (author, channelId, clientMessageId) is idempotent (§7.1)."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["message", "memo", "article"],
+          "default": "message",
+          "description": "Message type (§5.3); omitted means message. Gated by the channel's post:<type> permission (§5.2.1)."
+        },
+        "content": { "$ref": "#/$defs/Content" },
+        "attachments": {
+          "type": "array",
+          "items": { "$ref": "./objects.json#/$defs/Attachment" },
+          "description": "Attachments as returned by POST /api/media (§5.8); omitted means []."
+        },
+        "reference": {
+          "allOf": [
+            { "$ref": "#/$defs/MessageReference" },
+            { "properties": { "type": { "const": "reply" } } }
+          ],
+          "description": "A reply's parent (§7.2): type MUST be reply (anything else is 400), and id MUST name a message in the same channel. Only such a valid reply satisfies replyOnly / replyOnlyTo (§5.2.1)."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "metadata": {
+          "$ref": "./objects.json#/$defs/MetadataList",
+          "description": "Metadata objects (§5.4); omitted means []."
+        }
+      }
+    },
     "BaseMessage": {
       "type": "object",
       "additionalProperties": true,
       "required": ["id", "author", "type", "content", "attachments", "createdAt", "metadata"],
       "properties": {
         "id": { "$ref": "./common.json#/$defs/LocalId" },
+        "clientMessageId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Echo of the clientMessageId the create carried (§7.1, §7.4). It MUST be present on the author's copies of message.created, live or replayed by subscribe.since, and on the response to a create, first or duplicate; elsewhere a provider MAY include or omit it."
+        },
         "author": { "$ref": "./identity.json#/$defs/UserRef" },
         "type": { "type": "string", "enum": ["message", "memo", "article"] },
         "content": { "$ref": "#/$defs/Content" },

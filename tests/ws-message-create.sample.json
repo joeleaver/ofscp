@@ -6,9 +6,22 @@
     "groupId": "grp_1",
     "channelId": "chn_general",
     "clientMessageId": "cmsg_abc123",
+    "type": "memo",
     "content": {
       "mime": "text/plain",
       "text": "hi"
-    }
+    },
+    "attachments": [
+      {
+        "id": "att_1",
+        "mime": "image/png",
+        "url": "https://cdn.a.com/att/att_1.png",
+        "size": 20480,
+        "width": 1024,
+        "height": 768
+      }
+    ],
+    "tags": ["#intro"],
+    "metadata": []
   }
 }

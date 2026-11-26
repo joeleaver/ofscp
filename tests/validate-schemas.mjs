@@ -73,6 +73,7 @@ async function main() {
     ['tests/member.sample.json', 'schemas/v0.1/member.json'],
     ['tests/join-request.sample.json', 'schemas/v0.1/join-request.json'],
     ['tests/message.sample.json', 'schemas/v0.1/message.json'],
+    ['tests/message-create-request.sample.json', 'schemas/v0.1/message-create-request.json'],
     ['tests/message-update-request.sample.json', 'schemas/v0.1/message-update-request.json'],
     ['tests/attachment.sample.json', 'schemas/v0.1/attachment.json'],
     ['tests/reaction.sample.json', 'schemas/v0.1/reaction.json'],
@@ -190,6 +191,19 @@ async function main() {
     }
 
     console.log(`OK: ${path.basename(samplePath)} validates against ${path.basename(schemaPath)}`);
+  }
+
+  // The request-signing vector (§4.4.3) signs a POST that creates a channel
+  // message (§7.1); its body must be a valid message-create request.
+  const vector = await loadJson('tests/signing-vector.json');
+  const createSchema = await loadJson('schemas/v0.1/message-create-request.json');
+  const validateCreate = ajv.getSchema(createSchema.$id) ?? (await ajv.compileAsync(createSchema));
+  if (!validateCreate(JSON.parse(vector.request.body))) {
+    console.error('Validation failed: signing-vector.json request.body against message-create-request.json');
+    console.error(validateCreate.errors);
+    process.exitCode = 1;
+  } else {
+    console.log('OK: signing-vector.json request.body validates against message-create-request.json');
   }
 }
 

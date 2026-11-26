@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/message-create-request.json",
+  "title": "OFSCP POST /api/groups/{groupId}/channels/{channelId}/messages request (v0.1)",
+  "description": "REST equivalent of the WS message.create command (§7.1): the same body without groupId and channelId, which are in the path.",
+  "$ref": "./defs/messaging.json#/$defs/MessageCreate"
+}

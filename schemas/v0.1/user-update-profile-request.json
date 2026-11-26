@@ -6,7 +6,13 @@
   "additionalProperties": true,
   "properties": {
     "displayName": { "type": "string" },
-    "avatar": { "$ref": "./defs/common.json#/$defs/HttpsUri" },
+    "avatar": {
+      "anyOf": [
+        { "$ref": "./defs/common.json#/$defs/HttpsUri" },
+        { "type": "null" }
+      ],
+      "description": "The new avatar URL (§6.3), or null to remove the avatar. Absent leaves it unchanged."
+    },
     "bio": { "type": "string" },
     "metadata": { "$ref": "./defs/objects.json#/$defs/MetadataList" }
   }

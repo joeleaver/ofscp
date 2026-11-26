@@ -18,20 +18,11 @@
             "channelId": { "type": "string", "minLength": 1 },
             "cursor": {
               "$ref": "../defs/common.json#/$defs/OpaqueCursor",
-              "description": "Opaque position of this event in the channel timeline (same cursor space as REST history, §7.2). Clients persist this to resume via subscribe.since."
+              "description": "Opaque position of this event in the channel timeline (same cursor space as REST history, §7.2). Clients persist this to resume via subscribe.since. Absent on the copy that answers a duplicate create (§7.1): that copy is not a timeline event, is exempt from ordering, and MUST NOT be stored as a resume point."
             },
             "message": {
-              "type": "object",
-              "additionalProperties": true,
-              "required": ["id", "author", "createdAt", "content"],
-              "properties": {
-                "id": { "type": "string", "minLength": 1 },
-                "clientMessageId": { "type": "string", "minLength": 1 },
-                "author": { "$ref": "../defs/identity.json#/$defs/UserRef" },
-                "createdAt": { "$ref": "../defs/common.json#/$defs/Rfc3339DateTime" },
-                "editedAt": { "$ref": "../defs/common.json#/$defs/Rfc3339DateTime" },
-                "content": { "$ref": "../defs/messaging.json#/$defs/Content" }
-              }
+              "$ref": "../defs/messaging.json#/$defs/BaseMessage",
+              "description": "The full canonical message (§5.3, §7.1). The author's copy MUST carry clientMessageId when the create carried one."
             }
           }
         }

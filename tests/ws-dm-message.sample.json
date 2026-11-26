@@ -9,8 +9,12 @@
       "id": "msg_77",
       "clientMessageId": "cmsg_dm_001",
       "author": "alice@a.com",
+      "type": "message",
+      "content": { "text": "hey, are we still on for tomorrow?", "mime": "text/plain" },
+      "attachments": [],
       "createdAt": "2026-01-05T18:42:00Z",
-      "content": { "text": "hey, are we still on for tomorrow?", "mime": "text/plain" }
+      "permissions": { "editUntil": "2026-01-05T19:42:00Z" },
+      "metadata": []
     }
   }
 }
