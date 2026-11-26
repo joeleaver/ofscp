@@ -831,7 +831,7 @@ Creates a group. The authenticated actor becomes the `owner`. Providers **MAY** 
 Fetches metadata for a single group.
 
 **Authorization:**
-- `public` / `discoverable` groups: no authentication required. Providers **MUST** accept an unsigned request here; a signed request is also accepted.
+- `public` / `discoverable` groups: no authentication required. Providers **MUST** accept an unsigned request here; a signed request is also accepted, subject to the inbound federation policy of §8 (*Authorization*).
 - `private` / `group` groups: the request must be signed (§4.4) by a member (local or remote) of the group.
 
 **Response (200 OK):**
@@ -2047,6 +2047,8 @@ Recipients **MUST** reject any nonce already seen for the same signer kind and `
 Authentication proves the calling provider domain; authorization is still required:
 
 * Providers **MUST** apply allow/deny policy for which remote providers may federate. It applies in **both** directions: a provider **MUST NOT** send **any** outbound request to a provider its policy denies — signed or unsigned, on its own behalf or forwarded for a user (DM delivery, reactions, edits and deletes, notification delivery), including key and discovery fetches — whatever stored state (conversation pointers, contacts, follows, memberships, notification endpoints) names it.
+* **Inbound**, the policy applies to every **signed** request, on every route (including public ones such as discovery and the keys endpoint when they are requested with a signature): a request whose `X-OFSCP-Actor` domain (§4.4) or `X-OFSCP-Provider` (§8.1) names a denied provider **MUST** be answered `403` `forbidden`. The check is made after §4.5 steps 1–5 (so a `401` or a digest `400` from those steps wins) and before any key or discovery fetch: at the start of §4.5 step 6 for a user-signed request, and at the start of §8.1 step 2 for a provider-signed one (§4.6 "no fetch is allowed"); since the signature is never verified, the request's nonce is not recorded (§4.5 *Replay store*). Over WebSocket, the same check applies to the `authenticate` actor, which **MUST** be refused with an `error` then close code `4001` (§7.1). An **unsigned** request carries no provider identity (an `Origin` header or source address is not one), so the policy does not apply to it: a provider answers unsigned requests to its public endpoints — discovery (§3.1), the keys endpoint (§4.6), and any route that accepts anonymous readers — as it would for anyone. This exposes nothing a denied provider could not fetch anonymously anyway.
+* **What a policy entry matches is provider-defined** (for example an exact canonical authority, or a domain and all its subdomains). Whatever the granularity, entries and the authorities they are tested against are compared in canonical form (§2.2), and a provider's own authority is never subject to its policy. A canonical authority may carry a port (§2.2); an entry that names a host without a port **SHOULD** match that host on every port, so that a denied host cannot be reached again on another port.
 * Providers **MUST** enforce channel/group tiers when serving federation traffic.
 
 #### Outbound requests (Normative)
@@ -2136,7 +2138,7 @@ Because the home provider owns the timeline and fans out to **all** subscribers 
 #### Connection & scale notes
 
 * A user holds **one** WebSocket per *foreign* provider it participates in, multiplexing all of that provider's channels over that single connection. A user with channels on its home provider plus two others maintains three connections total.
-* Providers **MAY** apply the per-connection subscription and rate limits of §7.1 to remote connections, and **MAY** apply the allow/deny federation policy of §8 (Authorization) at connect-time, closing disallowed connections with an `error` then close code `4001` (§7.1).
+* Providers **MAY** apply the per-connection subscription and rate limits of §7.1 to remote connections, and **MUST** apply the allow/deny federation policy of §8 (*Authorization*) to the `authenticate` actor, refusing a denied provider's user with an `error` then close code `4001` (§7.1).
 * Guest accounts are **not federated** (§4.8) and **MUST NOT** open remote WebSocket connections; remote providers **MAY** refuse them.
 
 ### 8.6. Known providers (peer discovery)
@@ -2407,6 +2409,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Implement device key registration (bootstrap-authenticated), listing, and revocation, closing revoked keys' WebSocket connections with `4003` (§4.7)
 - [ ] Validate Ed25519 request signatures over the §4.4.2 canonical string, including authority binding and nonce replay rejection, with one bounded provider-wide replay store that records a nonce only after the signature verifies (§4.5)
 - [ ] Apply the outbound-request rules (https only, public addresses only, no redirects) to every request to a host named by someone else (§8)
+- [ ] Apply federation allow/deny policy to every outbound request and to every signed inbound request (`403` at the start of §4.5 step 6 or §8.1 step 2, before any key or discovery fetch; WebSocket `4001`); answer unsigned requests to public endpoints regardless (§8)
 - [ ] Allow cross-origin access per §3.4 (CORS preflight and headers; no `Origin` check on WebSocket upgrades) on every endpoint in §3.4's scope (standard endpoints, `/.well-known/ofscp…`, attachment and pre-signed upload URLs); non-standard ambient-credential endpoints SHOULD stay same-origin
 - [ ] Authenticate WebSocket connections via the signed `auth.challenge`/`authenticate` handshake (§7.1)
 - [ ] Serve user public keys via the `/.well-known/ofscp/users/{handle}/keys` endpoint (`200` + `keys: []` for any well-formed unknown, disabled or keyless handle, §4.6)
