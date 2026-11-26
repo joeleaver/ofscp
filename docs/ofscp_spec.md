@@ -777,7 +777,7 @@ Rules:
 
 * A provider **MUST** reject with **`400`** a create or edit (§7.1) that leaves an article with a `cover` that is not the `id` of an entry in its `attachments`, or a `title` or `summary` that is not a string. It **MAY** limit their length and reject a longer value with `400`.
 * These fields are defined only for `type` `article`. On any other type a provider **MUST** ignore them: it neither stores nor returns them (as it ignores `type` on a DM, §7.4).
-* When `title` is absent, a client **MUST** use the article's first level-1 heading (`# Title` in `text/markdown`, `<h1>` in `text/html`) as its title, if it has one. When `title` is present, clients show it above the body, and the body **SHOULD NOT** repeat it as a heading.
+* When `title` is absent, a client **MUST** take the article's title from its body when the body's **first block** is a level-1 heading: in `text/markdown` an ATX heading (`# Title`) or a Setext heading (`Title` underlined with `===`), in `text/html` an `<h1>` element. A level-1 heading that is not the first block is not a title. The heading stays in the body: a renderer **MAY** hide it when it shows the title separately. When `title` is present, clients show it above the body, and the body **SHOULD NOT** repeat it as a heading.
 * When `summary` is absent, a client **MAY** derive one from the body (for example, its first paragraph as plain text).
 * A client shows the `cover` attachment as the article's cover, in lists and above the body. When `cover` is absent, the article has no cover; clients **MAY** use the first `image/*` attachment instead.
 
@@ -814,7 +814,7 @@ Providers **MUST** accept `text/plain` and `text/markdown` bodies for every mess
 In every format:
 
 * Clients **MUST NOT** make a link active unless its scheme is `http`, `https` or `mailto` (or `attachment`, below). Other links are shown as text.
-* Clients **SHOULD NOT** load any remote resource the body names, such as a Markdown image `![alt](https://…)`, without a user action, because loading it tells that host who read the message and when. They show such an image as a link (with its alt text) instead. This does not apply to the message's own `attachments`, which clients **MAY** load automatically.
+* Clients **SHOULD NOT** load any remote resource the body names, such as a Markdown image `![alt](https://…)`, without a user action, because loading it tells that host who read the message and when. They show such an image as a link (with its alt text) instead. This does not apply to the message's own `attachments` when its author is a local user of the provider that holds the message: that provider hosts them and has checked them (§5.8), and clients **MAY** load them automatically. Attachments of an author on another provider are hosted wherever that author's home provider chose, and loading them tells that host who read the message and when; clients **SHOULD NOT** load them without a user action (a user setting that allows it counts as one), and show them as file links or placeholders until then.
 
 **Inline attachments.** A body places one of the message's own attachments at a point in the text by naming its `id` with an `attachment:` reference:
 
@@ -1121,7 +1121,7 @@ Messages reference uploaded files via the `attachments` array (§5.3). An `Attac
 
 #### Where to upload
 
-A client **MUST** upload every attachment to its user's **home provider**, whatever the attachment is for: a message in a channel on that provider, a message in a **remote** channel (§8.2, §8.5), a DM to a user on any provider (§7.4, §8.3), or an avatar (§6.3). The home provider stores the file and answers for its quota and abuse handling; the channel's provider only checks the `Attachment` the message carries (*Checks on attachments in a message*, below). A provider **MAY** reject an upload from a remote actor with **`403`**.
+A client **MUST** upload every attachment to its user's **home provider**, whatever the attachment is for: a message in a channel on that provider, a message in a **remote** channel (§8.2, §8.5), a DM to a user on any provider (§7.4, §8.3), or an avatar (§6.3). The home provider stores the file and answers for its quota and abuse handling; the channel's provider only checks the `Attachment` the message carries (*Checks on attachments in a message*, below). A provider **MAY** reject an upload from a remote actor with **`403`**. A client uploads the file again for each provider it posts it to: an upload is used on one provider only (*Revocation*, below).
 
 #### POST /api/media
 
@@ -1163,25 +1163,35 @@ An attachment's `url` (and its `thumbnail`'s `url`) is a **capability URL**: any
 * Each `url` **MUST** contain at least **128 bits** of entropy from a cryptographically secure random source, so that it cannot be guessed. Nothing derivable by others — a sequential number, a timestamp, or a hash of the file's contents — counts towards those bits.
 * The provider **MUST NOT** offer any way to list or search attachment URLs, other than the messages and profiles that carry them.
 * `url` **MUST** be `https`. The provider **MAY** serve it from any host: its own domain, a CDN, or an object store on another domain. How and where it stores the bytes is up to the provider.
+* Every attachment response **MUST** carry `X-Content-Type-Options: nosniff`. A response whose type is not `image/*`, `video/*` or `audio/*`, or is `image/svg+xml` (which can carry script), **MUST** also carry `Content-Disposition: attachment` or `Content-Security-Policy: sandbox`, so that a browser opening the `url` directly does not run the file as a page of that origin.
+* The provider **SHOULD** serve attachments from an origin other than its web client's, so that a file served there cannot act with the web client's origin.
+
+These are response headers, which a CDN or object store can be configured to send; they do not constrain how or where the provider stores the bytes.
 * The provider **SHOULD NOT** mark an attachment publicly cacheable (`Cache-Control: public`, or a shared-cache directive such as `s-maxage`) unless every message that references it is readable by anyone (a `public`-tier channel it hosts, §11.3). The uploading provider usually cannot know where an attachment is posted (a remote channel, a DM), so by default it serves attachments as `Cache-Control: private`. It **MAY** add `max-age` and `immutable`, since the bytes at a `url` never change.
 
 A leaked `url` is readable by whoever holds it until the provider stops serving it.
 
-**Revocation.** When every message that references an attachment has been deleted (tombstoned or reaped, §7.1) and nothing else uses it (such as a profile's `avatar`), the hosting provider **SHOULD** stop the attachment being fetchable, in one of two ways:
+**Revocation.** A message *references* an attachment when the attachment (or the attachment whose `thumbnail` it is) is in the `attachments` of the message's **current** version. Deleting a message (tombstoning or reaping it, §7.1) ends its references, and so does an edit that replaces `attachments` with an array that leaves the attachment out (§7.1).
+
+Each upload is used on **one** provider: a client **MUST NOT** place an `Attachment` in messages on different providers, and uploads the file again for each (an avatar counts as a use on the home provider). An upload is then in one of two cases at its home provider:
+
+* **Used only here**: a message the provider holds, or a profile it hosts (such as an `avatar`), references it. The provider knows every use. When none remains — every such message has been deleted or edited to drop it, and no profile uses it — the provider **SHOULD** stop the attachment being fetchable, in one of the two ways below.
+* **Not used here**: no message or profile the provider holds references it. It may be in a message in a remote channel or a DM, which the provider cannot see, so the provider **MUST NOT** treat it as unreferenced for that reason alone. It **MAY** keep such an upload as long as it keeps the uploader's account, or remove it after a retention period it states to its users. Clients **SHOULD** make clear to users that deleting such a message does not withdraw a URL that was already seen.
+
+The two ways to stop an attachment being fetchable are:
 
 * remove it, so that its `url` answers `404` or `410`, within a bounded time (RECOMMENDED: within 24 hours); or
-* serve attachments only through **short-lived URLs**: each time the provider returns a message, it mints a fresh `url` and sets `expiresAt` to when that `url` stops working, and once the attachment is unreferenced it mints no more. A client whose attachment `url` has passed `expiresAt`, or answers `403`, `404` or `410`, **SHOULD** re-read the message (§7.2, §7.4) for a fresh `url` before treating the file as gone.
-
-A provider can do this only for messages it holds. An attachment uploaded at the home provider and posted to a remote channel or sent as a DM is referenced by a message on another provider, so the home provider cannot see that message's deletion. Clients **SHOULD** make clear to users that deleting such a message does not withdraw a URL that was already seen.
+* serve it through **short-lived URLs**. This is only for uploads used only here, since a provider that holds a message returns its attachment `url`s as stored and never refreshes another provider's URL (*Checks on attachments in a message*, below); an upload not used here keeps a stable `url` without `expiresAt`. Each time the provider returns a message it holds, it mints a fresh `url` for each such attachment and sets `expiresAt` to when that `url` stops working; once the attachment is unreferenced it mints no more, and the `url` its upload response returned stops working too. A client whose attachment `url` has passed `expiresAt`, or answers `403`, `404` or `410`, **SHOULD** re-read the message (§7.2, §7.4) for a fresh `url` before treating the file as gone.
 
 #### Checks on attachments in a message
 
 The provider that stores a message — the channel's provider for `message.create` and `POST …/messages` (§7.1), the recipient's provider for a DM (§7.4, §8.3), and either for an edit that replaces `attachments` (§7.1) — checks each `Attachment` in it, and rejects the message with **`400`** if a check fails:
 
-* For an attachment whose `url` it hosts (one its own `POST /api/media` issued), the provider **MUST** check that the `id` is one of its stored uploads, that it was uploaded by the message's author, and that `mime`, `size` and `hash` equal its stored values. It stores the message with its own record of the attachment, not the client's copy of the optional fields.
-* For an attachment whose `url` it does not host, the provider **MUST** reject a `url` that is not `https`. It **SHOULD NOT** fetch the URL on the client's behalf; if it does (for example, to check `hash` or make a thumbnail), the fetch **MUST** follow the outbound-request rules of §8.
+* An attachment is **hosted** by the provider when its own `POST /api/media` or `POST /api/media/uploads` issued it (with its `thumbnail`). For a hosted attachment the provider **MUST** check that the `id` is one of its stored uploads, that it was uploaded by the message's author, that a pre-signed upload has completed, and that `mime`, `size` and `hash` equal its stored values. It stores the message with its own record of the attachment (including its `thumbnail`), not the client's copy of the optional fields.
+* When the message's author is one of its **local** users, every attachment **MUST** be hosted: its local users upload to it (*Where to upload*, above), so the provider rejects any attachment it does not host.
+* For an attachment it does not host (from an author on another provider), the provider **MUST** reject a `url` or `thumbnail.url` that is not `https`, and a `thumbnail` that itself carries a `thumbnail`. It **MUST NOT** keep an `expiresAt` the author supplied, on the attachment or its `thumbnail`: only the provider that mints a short-lived URL sets `expiresAt` (*Revocation*, above), and it does so only in messages it holds. It **SHOULD NOT** fetch the URL on the client's behalf; if it does (for example, to check `hash` or make a thumbnail), the fetch **MUST** follow the outbound-request rules of §8.
 
-Clients **MUST** treat attachments as **untrusted**. The message's provider checks only the attachments it hosts, and a client cannot tell which hosts those are (a provider may serve from any host, above), so for any attachment the `mime`, `size`, `hash`, dimensions and thumbnail may be claims of the author that nobody checked. A client **SHOULD** verify `hash` when present before showing the file as that attachment, and **MUST NOT** open a fetched file as an active document (for example, render it as HTML or run it), whatever its `mime` says.
+Clients **MUST** treat attachments as **untrusted**. The message's provider checks only the attachments it hosts, and a client cannot tell which hosts those are (a provider may serve from any host, above), so for any attachment the `mime`, `size`, `hash`, dimensions and thumbnail may be claims of the author that nobody checked. A client **SHOULD** verify `hash` when present before showing the file as that attachment, and **MUST NOT** open a fetched file as an active document (for example, render it as HTML or run it), whatever its `mime` says. The serving headers above guard browsers that open a `url` directly; they do not replace this rule.
 
 ---
 
@@ -1757,9 +1767,9 @@ An edit (`MessageUpdate`, in `defs/messaging.json`) carries at least one of thes
 | `attachments` | The new `attachments` array, in full. The checks of §5.8 apply to it as to a create. |
 | `tags` | The new `tags` array, in full. |
 | `mentions` | The new `mentions` array, in full (§5.3). |
-| `title`, `summary`, `cover` | Article fields (§5.3). `null` removes the field. Ignored on other types. |
+| `title`, `summary`, `cover` | Article fields (§5.3). `null` removes the field. Ignored on other types, and do not count towards the one field an edit needs there. |
 
-`type`, `reference` and `metadata` cannot be edited; the provider ignores them in an edit. The provider applies the same `400` rules as for a create to the fields present, and to the result: an edit that leaves an article's `cover` naming none of its `attachments` is a `400`. An edit that carries none of the fields above is a `400`. Edits never create notification entries (§10.1).
+`type`, `reference` and `metadata` cannot be edited; the provider ignores them in an edit. The provider applies the same `400` rules as for a create to the fields present, and to the result: an edit that leaves an article's `cover` naming none of its `attachments` is a `400`. An edit that carries none of the fields above is a `400`, and so is an edit of a message whose `type` is not `article` that carries only article fields. An edit that drops an attachment from `attachments` ends that message's reference to it, with the same *Revocation* consequences as a delete (§5.8). Edits never create notification entries (§10.1).
 
 A successful edit sets `editedAt` on the message and fans out `message.updated` to subscribers, carrying the full updated `Message` (§5.3), as `message.created` does.
 
@@ -2075,7 +2085,7 @@ The provider emits a `dm.reaction` event mirroring the channel `reaction.added`/
 }
 ```
 
-**Edits & deletes.** Editing and deleting a DM message follow the **same storage-follows-message rule** as reactions: the message lives only on the provider that holds it (the recipient's inbox, §8.3). To edit or delete a message the actor **sent**, the author's client signs (§4.4) the `PATCH`/`DELETE` and sends it directly to that message's home provider, over the same client→provider delivery path as DM-send and DM-reaction. No provider forwards it. Only the **original author** may edit or delete, and the provider applies the §7.1 author/tombstone and edit rules against its stored copy (including the attachment checks of §5.8 for an edit that replaces `attachments`) and emits the resulting `dm.message` update to its local participant's connections and to the conversation's subscribers (*Real-time*, above).
+**Edits & deletes.** Editing and deleting a DM message follow the **same storage-follows-message rule** as reactions: the message lives only on the provider that holds it (the recipient's inbox, §8.3). To edit or delete a message the actor **sent**, the author's client signs (§4.4) the `PATCH` (body `MessageUpdate`, as in §7.1) or `DELETE` and sends it directly to that message's home provider, over the same client→provider delivery path as DM-send and DM-reaction. No provider forwards it. Only the **original author** may edit or delete, and the provider applies the §7.1 author/tombstone and edit rules against its stored copy (including the attachment checks of §5.8 for an edit that replaces `attachments`) and emits the resulting `dm.message` update to its local participant's connections and to the conversation's subscribers (*Real-time*, above).
 
 **Replies.** Threading works exactly as in §7.2: a reply carries `reference.type === "reply"` with `reference.id` set to the parent DM message's `id`, and `reference.id` **MUST** resolve to a message in the **same conversation**. Providers expose the same reply listing as §7.2, DM-scoped:
 
@@ -2252,11 +2262,11 @@ The local DM lifecycle (conversation id derivation, listing, reading, real-time)
 
 * **Source of Truth:** The recipient's home provider is the authoritative store for that user's inbox. v0.1 keeps **no sender copy** — a DM is stored only in the recipient's inbox (§7.4).
 * **Conversation id:** `{dmId}` is derived deterministically from the two participants (§7.4); both parties compute it identically without coordination.
-* **Client-to-Remote Delivery:** Clients **MUST** deliver DMs directly to the recipient's home provider via `POST /api/federation/dms/{dmId}/messages`, user-signed (§4.4). The body is a single message (`clientMessageId`, `content`, optional `to`, `attachments` and `reference`); its attachments are uploaded at the sender's home provider and checked by the recipient's provider (§5.8). After delivering, the client records a conversation pointer at its own home provider (§7.4).
+* **Client-to-Remote Delivery:** Clients **MUST** deliver DMs directly to the recipient's home provider via `POST /api/federation/dms/{dmId}/messages`, user-signed (§4.4). The body is a single message (`clientMessageId`, `content`, optional `to`, `attachments`, `mentions` and `reference`); its attachments are uploaded at the sender's home provider and checked by the recipient's provider (§5.8). After delivering, the client records a conversation pointer at its own home provider (§7.4).
 * **Verification:** The receiving provider **MUST** reject the delivery with **`400`** when `{dmId}` does not equal the id derived from `{author, recipient}`, preventing delivery into a conversation the author is not part of.
 * **Storage:** The recipient's provider stores the message in the recipient's inbox and emits `dm.message` to the recipient's subscribers (§7.4).
 * **Reactions (OPTIONAL):** A DM reaction is stored alongside its target message — i.e. on the provider that holds that message (the source of truth above). Add/remove therefore follow the **same client→provider delivery path as the DM message**: the reacting client signs (§4.4) and delivers to the message's home provider (e.g. `PUT|DELETE /api/federation/dms/{dmId}/messages/{messageId}/reactions/{key}`), which stores it and emits `dm.reaction` (§7.4). No sender copy.
-* **Edits & deletes (OPTIONAL):** A DM message edit/delete is likewise applied on the provider that holds the message (the source of truth above), so editing/deleting a message the actor **sent** follows the **same client→provider delivery path as the DM message**: the author signs (§4.4) and delivers to the message's home provider (e.g. `PATCH|DELETE /api/federation/dms/{dmId}/messages/{messageId}`), which applies the §7.1 author/tombstone rules and emits the resulting `dm.message` update (§7.4). Only the original author may do so. No sender copy.
+* **Edits & deletes (OPTIONAL):** A DM message edit/delete is likewise applied on the provider that holds the message (the source of truth above), so editing/deleting a message the actor **sent** follows the **same client→provider delivery path as the DM message**: the author signs (§4.4) and delivers to the message's home provider (e.g. `PATCH|DELETE /api/federation/dms/{dmId}/messages/{messageId}`; the `PATCH` body is `MessageUpdate`, `message-update-request.json`, §7.1), which applies the §7.1 author/tombstone rules and emits the resulting `dm.message` update (§7.4). Only the original author may do so. No sender copy.
 
 #### Confidentiality (Normative)
 
@@ -2580,7 +2590,9 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Accept `text/plain` and `text/markdown` bodies for every message type; store the article fields `title`, `summary` and `cover` (rejecting a `cover` that names none of the message's attachments) and ignore them on other types; store `mentions` and use it in place of text parsing when present (§5.3, §10.1)
 - [ ] Support single-step media upload at `POST /api/media`, setting `mime`, `size` and `hash`, and `width`, `height` and `durationMs` from the bytes when it can determine them or from the uploader otherwise, and accepting an uploader's `thumbnail` part (§5.8)
 - [ ] Serve attachments as capability URLs: `https`, at least 128 bits of entropy, unlisted, fetchable unsigned, with the §3.4 CORS headers, from any host the provider chooses (§5.8)
-- [ ] Check each attachment in a stored message: for a URL it hosts, that the `id` exists, was uploaded by the author, and matches in `mime`, `size` and `hash`; for any other URL, that it is `https`, fetching it only under the §8 outbound rules (§5.8)
+- [ ] Check each attachment in a stored message: for one it hosts (from `POST /api/media` or a completed `POST /api/media/uploads`), that the `id` exists, was uploaded by the author, and matches in `mime`, `size` and `hash`; reject any it does not host from a local author; for a remote author's, that `url` and `thumbnail.url` are `https` and the `thumbnail` has no `thumbnail`, dropping the author's `expiresAt` and fetching only under the §8 outbound rules (§5.8)
+- [ ] Serve attachments with `X-Content-Type-Options: nosniff`, and with `Content-Disposition: attachment` or `Content-Security-Policy: sandbox` for types other than images (or for SVG), video and audio (§5.8)
+- [ ] Never treat an upload as unreferenced because no message it holds references it (§5.8)
 - [ ] Keep each user's group list at `GET`/`PUT`/`DELETE /api/me/groups` (its own memberships plus unchecked pointers to remote groups) and emit `groups.updated` (§5.7)
 - [ ] Answer `PATCH /api/me/profile` with the updated `UserProfile`, clear the avatar on `"avatar": null`, and reject a non-`https` `avatar` (SHOULD also reject one it does not host) (§6.3)
 - [ ] Support direct messages: deterministic `dmId` derivation, inbox-only storage (no sender copy), the `{dmId}`/`to` verification on delivery, conversation pointers and `dm.conversation`, conversation listing/reading, `dm.message` real-time delivery, and `dmId` subscriptions from a remote participant (§7.4)
@@ -2599,7 +2611,8 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 ### Provider **SHOULD**
 
 - [ ] Include the caller's `membership` in `GET /api/groups/{groupId}` for a signed member, never marking that answer publicly cacheable (§5.5)
-- [ ] Not mark attachments publicly cacheable unless all their messages are public, and stop serving an attachment once every message referencing it is deleted: remove it within a bounded time, or serve short-lived URLs with `expiresAt` (§5.8)
+- [ ] Not mark attachments publicly cacheable unless all their messages are public, and stop serving an upload used only in its own messages and profiles once no current message version or profile references it: remove it within a bounded time, or serve it through short-lived URLs with `expiresAt`, keeping a stable `url` for uploads not used there (§5.8)
+- [ ] Serve attachments from an origin other than the web client's (§5.8)
 - [ ] Give `article` messages a longer edit window than chat, or none (§7.1)
 
 ### Provider **MAY** (optional)
@@ -2622,9 +2635,9 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Support all message types or graceful fallback
 - [ ] Treat the `message.created` that answers a duplicate create (no `cursor`) as the result of the pending send, not as a new message, and never store it as a resume point (§7.1)
 - [ ] Set an avatar by uploading it to the home provider (`POST /api/media`) and then sending its `url` in `PATCH /api/me/profile` (§6.3)
-- [ ] Upload every attachment to the home provider, including for posts to remote channels and DMs (§5.8)
+- [ ] Upload every attachment to the home provider, including for posts to remote channels and DMs, uploading again for each provider an attachment is used on (§5.8)
 - [ ] Render `text/plain` and CommonMark `text/markdown`, showing raw HTML in Markdown as text; render `text/html` only through the §5.3 allow-list sanitizer (or as text with tags removed); make only `http`, `https`, `mailto` and `attachment:` links active (§5.3)
-- [ ] Resolve `attachment:<id>` references against the message's own attachments, show unreferenced attachments after the body, and use the first level-1 heading as an article's title when `title` is absent (§5.3)
+- [ ] Resolve `attachment:<id>` references against the message's own attachments, show unreferenced attachments after the body, and, when an article has no `title`, use its body's first block as the title if that block is a level-1 heading (ATX or Setext, or `<h1>`) (§5.3)
 - [ ] Treat attachment metadata and files as untrusted, never opening a fetched file as an active document (§5.8)
 
 ### Client **SHOULD**
@@ -2633,7 +2646,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Provide UX for tiers (access + discoverability)
 - [ ] Handle federation latency + retries
 - [ ] Name the DM recipient in `to`, record a conversation pointer at the home provider after a cross-provider send, and read sent history from the counterparty's provider (§7.4)
-- [ ] Not load remote content a message body names without a user action (§5.3)
+- [ ] Not load remote content a message body names, or the attachments of an author on another provider than the message's, without a user action (§5.3)
 - [ ] Set `mentions` on messages that mention users (§5.3)
 - [ ] Record a membership pointer at the home provider after joining a remote group, and remove it after leaving (§5.7)
 - [ ] Refresh an expired or failing attachment `url` by re-reading its message (§5.8)

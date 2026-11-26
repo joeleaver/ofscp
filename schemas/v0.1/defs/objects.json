@@ -40,11 +40,12 @@
         "durationMs": { "type": "integer", "minimum": 0, "description": "Duration in milliseconds for audio/video." },
         "thumbnail": {
           "$ref": "#/$defs/Attachment",
+          "not": { "required": ["thumbnail"] },
           "description": "Optional preview image (image/*), e.g. a video's poster frame (§5.8). Set at upload by the provider or from the uploader's thumbnail part. A thumbnail MUST NOT itself carry a thumbnail."
         },
         "expiresAt": {
           "$ref": "./common.json#/$defs/Rfc3339DateTime",
-          "description": "When a short-lived url stops working (§5.8, Revocation). Absent = the url does not expire. Clients refresh it by re-reading the message."
+          "description": "When a short-lived url stops working (§5.8, Revocation). Absent = the url does not expire. Set only by the provider that mints a short-lived url, in messages it holds; a provider storing another provider's attachment drops it. Clients refresh it by re-reading the message."
         }
       }
     }

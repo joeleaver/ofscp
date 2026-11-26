@@ -21,6 +21,11 @@
       "type": "array",
       "items": { "$ref": "./defs/objects.json#/$defs/Attachment" }
     },
+    "mentions": {
+      "type": "array",
+      "items": { "$ref": "./defs/identity.json#/$defs/UserRef" },
+      "description": "Actors the message mentions (§5.3). When present it is authoritative for mention notifications (§10.1)."
+    },
     "reference": { "$ref": "./defs/messaging.json#/$defs/MessageReference" }
   }
 }
