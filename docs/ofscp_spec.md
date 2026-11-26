@@ -1456,7 +1456,7 @@ Rules:
   * Example: a provider that supports `message.create` **MUST** emit `message.created`.
 * Providers **MAY** emit additional `type` values; clients **MUST** ignore unknown types.
 * A command whose `type` is a standard command above that the provider does not support (or does not support yet) **MUST** be answered with an `error` (`bad_request`, `correlationId` = the command's `id`); silently ignoring it would leave the client waiting for a reply. A command of an unknown, non-standard `type` is ignored (§2.3).
-* A standard command whose `data` does not match its schema **MUST** be answered with an `error` (`bad_request`, `correlationId` = the command's `id`).
+* A standard command other than `authenticate` whose `data` does not match its schema **MUST** be answered with an `error` (`bad_request`, `correlationId` = the command's `id`). A malformed `authenticate` is an authentication failure instead (*Authentication*).
 * For request/response style interactions (e.g. `subscribe`, `message.create`), providers **SHOULD** echo the client’s request `id` in `correlationId`.
 
 #### Subscriptions
@@ -2466,7 +2466,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Apply federation allow/deny policy to every outbound request and to every signed inbound request (`403` at the start of §4.5 step 6 or §8.1 step 2, before any key or discovery fetch; WebSocket `4001`); answer unsigned requests to public endpoints regardless (§8)
 - [ ] Allow cross-origin access per §3.4 (CORS preflight and headers; no `Origin` check on WebSocket upgrades) on every endpoint in §3.4's scope (standard endpoints, `/.well-known/ofscp…`, attachment and pre-signed upload URLs); non-standard ambient-credential endpoints SHOULD stay same-origin
 - [ ] Authenticate WebSocket connections via the signed `auth.challenge`/`authenticate` handshake (§7.1), answering a failure with an `error` whose `code`/`status` mirror the REST answer (`401`; `403` for federation policy; `503` when the keys could not be fetched) and then close code `4001`, never `1013`
-- [ ] Follow the WebSocket envelope and command rules (§7.1): accept commands without `ts` and ignore its value; answer a missing `id` (after authentication), malformed `data` or a standard command the provider does not support with `error` `bad_request`; ignore unknown non-standard command types (§2.3); use `4001`/`4003` only for the reasons in the close-code table
+- [ ] Follow the WebSocket envelope and command rules (§7.1): accept commands without `ts` and ignore its value; answer a missing `id` (after authentication), malformed `data` (other than in `authenticate`, which fails authentication) or a standard command the provider does not support with `error` `bad_request`; ignore unknown non-standard command types (§2.3); use `4001`/`4003` only for the reasons in the close-code table
 - [ ] Subscribe the readable channels of a partially refused `subscribe` and refuse the rest with one `not_found` `error` naming them in `details.channels` (only the `error` when none is readable); refuse a `subscribe` that would exceed the subscription cap as a whole with `subscription_limit` (§7.1)
 - [ ] Serve user public keys via the `/.well-known/ofscp/users/{handle}/keys` endpoint (`200` + `keys: []` for any well-formed unknown, disabled or keyless handle, §4.6)
 - [ ] Re-fetch keys or discovery on an unknown `key_id` before rejecting; answer `503`, not `401`, when they cannot be fetched (§4.6, §8.1)
