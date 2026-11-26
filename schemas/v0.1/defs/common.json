@@ -4,6 +4,11 @@
   "title": "OFSCP Common Definitions (v0.1)",
   "type": "object",
   "$defs": {
+    "Ed25519PublicKey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$",
+      "description": "An Ed25519 public key: the raw 32-byte key of RFC 8032 (not a DER SubjectPublicKeyInfo), encoded as standard base64 with padding (RFC 4648 section 4), i.e. exactly 44 characters ending in '='."
+    },
     "HttpsUri": {
       "type": "string",
       "format": "uri",
