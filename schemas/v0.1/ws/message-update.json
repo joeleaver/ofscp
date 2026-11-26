@@ -10,15 +10,18 @@
       "properties": {
         "type": { "const": "message.update" },
         "data": {
-          "type": "object",
-          "additionalProperties": true,
-          "required": ["groupId", "channelId", "messageId", "content"],
-          "properties": {
-            "groupId": { "type": "string", "minLength": 1 },
-            "channelId": { "type": "string", "minLength": 1 },
-            "messageId": { "type": "string", "minLength": 1 },
-            "content": { "$ref": "../defs/messaging.json#/$defs/Content" }
-          }
+          "allOf": [
+            { "$ref": "../defs/messaging.json#/$defs/MessageUpdate" },
+            {
+              "type": "object",
+              "required": ["groupId", "channelId", "messageId"],
+              "properties": {
+                "groupId": { "type": "string", "minLength": 1 },
+                "channelId": { "type": "string", "minLength": 1 },
+                "messageId": { "type": "string", "minLength": 1 }
+              }
+            }
+          ]
         }
       }
     }

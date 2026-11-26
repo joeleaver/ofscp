@@ -1,0 +1,11 @@
+{
+  "id": "evt_710",
+  "type": "groups.updated",
+  "ts": "2026-02-01T10:00:00Z",
+  "data": {
+    "groups": [
+      { "group": "https://b.com/api/groups/grp_9", "role": "member", "updatedAt": "2026-02-01T10:00:00Z" }
+    ],
+    "removed": ["https://c.example/api/groups/grp_x"]
+  }
+}

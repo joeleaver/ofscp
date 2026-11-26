@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/ws/groups-updated.json",
+  "title": "OFSCP WS groups.updated event (v0.1)",
+  "description": "The user's group list changed (§5.7, My groups); sent to all of the user's connections. groups holds added or changed entries, removed the group URIs that left the list; at least one is non-empty.",
+  "allOf": [
+    { "$ref": "./envelope.json" },
+    {
+      "type": "object",
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "const": "groups.updated" },
+        "data": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["groups", "removed"],
+          "anyOf": [
+            { "properties": { "groups": { "minItems": 1 } } },
+            { "properties": { "removed": { "minItems": 1 } } }
+          ],
+          "properties": {
+            "groups": {
+              "type": "array",
+              "items": { "$ref": "../defs/groups.json#/$defs/GroupPointer" }
+            },
+            "removed": {
+              "type": "array",
+              "items": { "$ref": "../defs/common.json#/$defs/HttpsUri" }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

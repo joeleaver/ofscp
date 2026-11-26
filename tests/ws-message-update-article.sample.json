@@ -1,0 +1,12 @@
+{
+  "id": "cli_211",
+  "type": "message.update",
+  "ts": "2026-01-01T12:05:00Z",
+  "data": {
+    "groupId": "grp_1",
+    "channelId": "chn_blog",
+    "messageId": "msg_3",
+    "title": "Welcome to the guild (updated)",
+    "tags": ["#intro", "#faq"]
+  }
+}
