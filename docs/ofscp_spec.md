@@ -464,7 +464,7 @@ Response:
 
 Providers **MUST** omit revoked keys.
 
-**Unknown, disabled or keyless handles.** For a syntactically valid handle (§2.2.1), the provider **MUST** answer `200` with `"keys": []` whether the handle is unknown, belongs to a disabled or deleted account, or simply has no active keys. The status code and body shape **MUST NOT** reveal which, so the endpoint can't be used to enumerate accounts (compare §4.1.2 login and §4.1.3 recovery). `actor` is the canonical actor (§2.2) formed from the requested handle. `cache_until` and every other field **MUST** be computed the same way in all of these empty cases. A handle that is not syntactically valid (for example one containing uppercase letters) names no possible account, so a provider **MAY** answer `404` `not_found` for it (or the same empty `200`). The provider **MUST NOT** lowercase or otherwise rewrite the handle and then serve another handle's keys. Verifiers **MUST** treat `404` and an empty `keys` list the same way: no key matches, and the request fails verification with `401` (§4.5).
+**Unknown, disabled or keyless handles.** For a syntactically valid handle (§2.2.1), the provider **MUST** answer `200` with `"keys": []` whether the handle is unknown, belongs to a disabled or deleted account, or simply has no active keys. The status code and body shape **MUST NOT** reveal which, so the endpoint can't be used to enumerate accounts (compare §4.1.2 login and §4.1.3 recovery). `actor` is the canonical actor (§2.2) formed from the requested handle. `cache_until` and every other field **MUST** be computed the same way in all of these empty cases. A handle that is not syntactically valid (for example one containing uppercase letters) names no possible account, so the provider **MUST** answer `404` `not_found` for it, never an empty `200`: there is no canonical actor to put in `actor`. The provider **MUST NOT** lowercase or otherwise rewrite the handle and then serve another handle's keys. Verifiers **MUST** treat `404` and an empty `keys` list the same way: no key matches, and the request fails verification with `401` (§4.5).
 
 Verifiers **MAY** cache until `cache_until`, including an empty list. A cache entry is valid only until its `cache_until`; wherever this specification lets a verifier rely on a **cached key** (a fetch failure or a refused fetch below, §7.1 re-resolution), it means a key from an unexpired entry. An expired entry **MUST NOT** be used to accept a request or keep a connection open, so a revoked key cannot outlive its cache because fetches keep failing or being refused. However, when a request's `key_id` is absent from the cached list, or fails verification against a key they believe should be valid, they **MUST** re-fetch before finally rejecting, so that newly registered or rotated keys are picked up promptly. Verifiers **MAY** limit these re-fetches per actor (for example to one per minute) to bound the cost of requests carrying bogus key ids. When the limit suppresses a re-fetch and no cached key matches, the verifier **SHOULD** answer `503` `service_unavailable` with `Retry-After` (the time until a re-fetch is allowed) rather than `401`, so a client whose key was just registered retries instead of treating its credentials as bad. The outcome of a fetch is classified as follows:
 
@@ -816,7 +816,7 @@ Providers **MUST** accept `text/plain` and `text/markdown` bodies for every mess
 
 In every format:
 
-* Clients **MUST NOT** make a link active unless its scheme is `http`, `https` or `mailto` (or `attachment`, below). Other links are shown as text.
+* Clients **MUST NOT** make a link active unless its scheme is `http`, `https` or `mailto` (or `attachment`, below). Other links are shown as text. A link without a scheme (a relative reference, including `#fragment` and `//host/path`) is not active: a message has no base URL.
 * Clients **SHOULD NOT** load any remote resource the body names, such as a Markdown image `![alt](https://…)`, without a user action, because loading it tells that host who read the message and when. They show such an image as a link (with its alt text) instead. This does not apply to the message's own `attachments` when its author is a local user of the provider that holds the message: that provider hosts them and has checked them (§5.8), and clients **MAY** load them automatically. Attachments of an author on another provider are hosted wherever that author's home provider chose, and loading them tells that host who read the message and when; clients **SHOULD NOT** load them without a user action (a user setting that allows it counts as one), and show them as file links or placeholders until then.
 
 **Inline attachments.** A body places one of the message's own attachments at a point in the text by naming its `id` with an `attachment:` reference:
@@ -831,7 +831,7 @@ The client resolves `<id>` against the same message's `attachments` and shows th
 
 ### 5.4. Metadata Objects
 
-Metadata can be attached to most objects to implement custom features. Such features **MUST** provide a public JSON Schema and **MUST** be implemented in such a way that ignoring the metadata will still result in a readable experience.
+Metadata can be attached to most objects to implement custom features. Such features **MUST** provide a public JSON Schema and **MUST** be implemented in such a way that ignoring the metadata will still result in a readable experience. OFSCP v0.1 has no schema registry: a metadata object names its schema by URL in `schema`, and a consumer ignores a schema it does not know. Registry governance is future work (§13).
 
 ```json
 {
@@ -904,7 +904,7 @@ Fetches metadata for a single group.
 
 **Errors:**
 - `404 Not Found`: Group does not exist
-- `403 Forbidden`: Private group and caller is not a member (including an unsigned caller)
+- `403 Forbidden`: `private`- or `group`-tier group (or one whose tier is unknown, §11) and caller is not a member (including an unsigned caller)
 - `401 Unauthorized`: a signed request that fails §4.5
 
 **Federation:** Remote providers MAY query this endpoint to display group info to users considering joining. Providers MUST enforce tier visibility rules for federated requests.
@@ -927,7 +927,9 @@ Deletes a group and its channels.
 
 #### GET /api/groups/{groupId}/channels
 
-Lists the channels of a group that are **visible to the caller**, per the effective read access rule (§11.3). Channels the caller cannot read **MUST** be omitted.
+Lists the channels of a group that are **visible to the caller**, per the effective read access rule (§11.3). Channels the caller cannot read **MUST** be omitted. **Authorization** is as for `GET /api/groups/{groupId}`: an unsigned request is an anonymous viewer (§4.5).
+
+**Errors:** `404` (no such group); `403` when the caller cannot read the group (§11.3 condition 1), as for `GET /api/groups/{groupId}`; `401` for a signed request that fails §4.5.
 
 **Response (`200 OK`):**
 ```json
@@ -1047,7 +1049,7 @@ Removes the caller's own membership. **Response:** `204 No Content`. The `owner`
 
 #### GET /api/groups/{groupId}/members
 
-Lists members. **Authorization:** visible to group members; for `public`/`discoverable` groups providers **MAY** expose it publicly. Members who have hidden their membership (§6) **MAY** be omitted for unauthorized viewers. Paginated per §7.2.
+Lists members. **Authorization:** visible to group members; for `public`/`discoverable` groups providers **MAY** expose it publicly. Members who have hidden their membership (§6) **MAY** be omitted for unauthorized viewers. Paginated per §7.2. **Errors:** `404` (no such group); `403` when a signed caller may not see the list (a non-member, unless the provider exposes the list publicly); `401` for a signed request that fails §4.5. This route is not among the anonymous-reader routes of §4.5: an unsigned request gets `401` (§4.5 step 1), even where the provider exposes the list to non-members who sign.
 
 **Response (`200 OK`):**
 ```json
@@ -1203,7 +1205,7 @@ The provider that stores a message — the channel's provider for `message.creat
 * When the message's author is one of its **local** users, every attachment **MUST** be hosted: its local users upload to it (*Where to upload*, above), so the provider rejects any attachment it does not host.
 * For an attachment it does not host (from an author on another provider), the provider **MUST** reject a `url` or `thumbnail.url` that is not `https`, and a `thumbnail` that itself carries a `thumbnail`. It **MUST NOT** keep an `expiresAt` the author supplied, on the attachment or its `thumbnail`: only the provider that mints a short-lived URL sets `expiresAt` (*Revocation*, above), and it does so only in messages it holds. It **SHOULD NOT** fetch the URL on the client's behalf; if it does (for example, to check `hash` or make a thumbnail), the fetch **MUST** follow the outbound-request rules of §8.
 
-Clients **MUST** treat attachments as **untrusted**. The message's provider checks only the attachments it hosts, and a client cannot tell which hosts those are (a provider may serve from any host, above), so for any attachment the `mime`, `size`, `hash`, dimensions and thumbnail may be claims of the author that nobody checked. A client **SHOULD** verify `hash` when present before showing the file as that attachment, and **MUST NOT** open a fetched file as an active document (for example, render it as HTML or run it), whatever its `mime` says. The serving headers above guard browsers that open a `url` directly; they do not replace this rule.
+Clients **MUST** treat attachments as **untrusted**. The message's provider checks only the attachments it hosts, and a client cannot tell which hosts those are (a provider may serve from any host, above), so for any attachment the `mime`, `size`, `hash`, dimensions and thumbnail may be claims of the author that nobody checked. A client **SHOULD** verify `hash` when present before showing the file as that attachment, and **MUST NOT** open a fetched file as an active document (for example, render it as HTML or run it), whatever its `mime` says. The serving headers above guard browsers that open a `url` directly; they do not replace this rule. A plain link that opens the `url` in a new top-level browsing context (with `rel="noopener noreferrer"`) is not opening a fetched file: the file runs, if at all, on its host's origin, under those headers, and the client need not force a download. Opening fetched bytes through a URL of the client's own origin (`blob:`, `data:`), through `srcdoc` or markup, or embedding the `url` in a frame, `object` or `embed`, is. Clients show a file only as an image, a player, or a link (§5.3).
 
 ---
 
@@ -2632,7 +2634,7 @@ A channel's tier can narrow, but never widen, access granted by its group's tier
 
 Providers **MUST** apply this one rule identically on every surface that exposes channel content or existence: channel listing and `GET` (§5.5), message history and replies (§7.2), live subscription (§7.1, §8.5), follows (§7.6), read markers (§7.7), notifications (§10.1), and discovery-feed items and their `sample` previews (§11.2). A `public` channel inside a `group`- or `private`-tier group is therefore readable by members only.
 
-**Hidden channels answer as missing.** When an actor (or an anonymous viewer, §4.5) cannot read a channel — any of conditions 1–3 fails, including when it cannot read the group at all — every surface above, and every other request naming the channel or one of its messages (message create, edit and delete, reactions, typing; §7.1) except the channel-join alias, which answers as a group join (§8.2), **MUST** answer exactly as for a channel that does not exist: `404` over REST, an `error` with `code` `not_found` over WebSocket (§7.3), and omission from listings, notifications and discovery. Read markers treat it as an unknown scope (§7.7). `403` remains only for an actor who **can** read the channel but lacks a permission for the action (e.g. `post:<type>`, `react` or `manage`, §5.2, §5.2.1).
+**Hidden channels answer as missing.** When an actor (or an anonymous viewer, §4.5) cannot read a channel — any of conditions 1–3 fails, including when it cannot read the group at all — every surface above, and every other request naming the channel or one of its messages (message create, edit and delete, reactions, typing; §7.1) except the channel-join alias, which answers as a group join (§8.2), **MUST** answer exactly as for a channel that does not exist: `404` over REST, an `error` with `code` `not_found` over WebSocket (§7.3), and omission from listings, notifications and discovery. Read markers treat it as an unknown scope (§7.7). `403` remains only for an actor who **can** read the channel but lacks a permission for the action (e.g. `post:<type>`, `react` or `manage`, §5.2, §5.2.1). A request that names only the group, such as the channel list, answers as the group's own endpoints do (§5.5): the group's existence is not hidden, only its channels.
 
 Access is evaluated continuously, not only at subscription time; see §7.1 *Losing access*.
 
@@ -2653,7 +2655,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Authenticate WebSocket connections via the signed `auth.challenge`/`authenticate` handshake (§7.1), answering a failure with an `error` whose `code`/`status` mirror the REST answer (`401`; `403` for federation policy; `503` when the keys could not be fetched) and then close code `4001`, never `1013`
 - [ ] Follow the WebSocket envelope and command rules (§7.1): accept commands without `ts` and ignore its value; answer a missing `id` (after authentication), malformed `data` (other than in `authenticate`, which fails authentication) or a standard command the provider does not support with `error` `bad_request`; ignore unknown non-standard command types (§2.3); use `4001`/`4003` only for the reasons in the close-code table
 - [ ] Subscribe the readable channels of a partially refused `subscribe` and refuse the rest with one `not_found` `error` naming them in `details.channels` (only the `error` when none is readable); refuse a `subscribe` that would exceed the subscription cap as a whole with `subscription_limit` (a provider may do this without evaluating access when the list names more distinct channels than the cap); never answer `bad_request` to a well-formed `subscribe` because its list is long (§7.1)
-- [ ] Serve user public keys via the `/.well-known/ofscp/users/{handle}/keys` endpoint (`200` + `keys: []` for any well-formed unknown, disabled or keyless handle, §4.6)
+- [ ] Serve user public keys via the `/.well-known/ofscp/users/{handle}/keys` endpoint (`200` + `keys: []` for any well-formed unknown, disabled or keyless handle, and `404` for a handle that is not well-formed, §4.6)
 - [ ] Re-fetch keys or discovery on an unknown `key_id` before rejecting; answer `503`, not `401`, when they cannot be fetched (§4.6, §8.1)
 - [ ] Reject a keys response whose `actor` is not the requested actor, and a discovery document whose `provider.domain` is not the authority it was fetched from (§3.1, §4.6); answer `403` for a denied signer and `401` when the outbound-request rules forbid the fetch (§4.6, §8)
 - [ ] Support group and channel management (create/read/update/delete) with the permission model (§5.5)
@@ -2662,7 +2664,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Treat `(author, channelId, clientMessageId)` as idempotent, running only authentication, visibility and the actor's permission checks before the duplicate lookup and returning the existing message on a duplicate (over WebSocket as a `message.created` with no `cursor`); echo `clientMessageId` on the author's `message.created`, live or replayed, and on every create response (§7.1, §7.4)
 - [ ] Carry the full canonical `Message` in `message.created`, `message.updated` and `dm.message` (§7.1, §7.4)
 - [ ] Support message edit (author-only; within `editUntil` when set, with no limit when absent) replacing any of `content`, `attachments`, `tags`, `mentions` and the article fields, and tombstone delete (§7.1)
-- [ ] Accept `text/plain` and `text/markdown` bodies for every message type; store the article fields `title`, `summary` and `cover` (rejecting a `cover` that names none of the message's attachments) and ignore them on other types; store `mentions` and use it in place of text parsing when present (§5.3, §10.1)
+- [ ] Accept `text/plain` and `text/markdown` bodies for every message type; store the article fields `title`, `summary` and `cover` (rejecting a `cover` that names none of the message's attachments) and ignore them on other types; store `mentions` (§5.3) and, if the provider offers the §10.1 feed, take a message's mentions from it in place of text parsing when present (§10.1)
 - [ ] Support single-step media upload at `POST /api/media`, recording its `target` (default: this provider) and setting `mime`, `size` and `hash`, and `width`, `height` and `durationMs` from the bytes when it can determine them or from the uploader otherwise, and accepting an uploader's `thumbnail` part (§5.8)
 - [ ] Serve attachments as capability URLs: `https`, at least 128 bits of entropy, unlisted, fetchable unsigned, with the §3.4 CORS headers, from any host the provider chooses (§5.8)
 - [ ] Check each attachment in a stored message: for one it hosts (from `POST /api/media` or a completed `POST /api/media/uploads`), that the `id` exists, was uploaded by the author, is a local upload, and matches in `mime`, `size` and `hash`; reject any it does not host from a local author; for a remote author's, that `url` and `thumbnail.url` are `https` and the `thumbnail` has no `thumbnail`, dropping the author's `expiresAt` and fetching only under the §8 outbound rules (§5.8)
@@ -2685,7 +2687,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Handle an unsigned request to a route that accepts anonymous readers as an anonymous viewer (`public` access only, never `401`), keeping `401` for signed requests that fail §4.5 (§4.5)
 - [ ] Support the `private` tier
 - [ ] Expose `GET /api/tiers` endpoint
-- [ ] Provide metadata schema registry (optional entries allowed)
+- [ ] On create, store `metadata` as given, rejecting (`400`) an invalid metadata object (§5.4, §7.1)
 
 ### Provider **SHOULD**
 
@@ -2717,7 +2719,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Upload every attachment to the home provider, including for posts to remote channels and DMs, naming as `target` the provider that will hold the message, and reusing an upload only in messages on its target, uploading again for any other provider (§5.8)
 - [ ] Render `text/plain` and CommonMark `text/markdown`, showing raw HTML in Markdown as text; render `text/html` only through the §5.3 allow-list sanitizer (or as text with tags removed); make only `http`, `https`, `mailto` and `attachment:` links active (§5.3)
 - [ ] Resolve `attachment:<id>` references against the message's own attachments, show unreferenced attachments after the body, and, when an article has no `title`, use its body's first block as the title if that block is a level-1 heading (ATX or Setext, or `<h1>`) (§5.3)
-- [ ] Treat attachment metadata and files as untrusted, never opening a fetched file as an active document (§5.8)
+- [ ] Treat attachment metadata and files as untrusted, never opening a fetched file as an active document: a plain link to its `url` is allowed, `blob:`/`data:` URLs, `srcdoc` and frames are not (§5.8)
 
 ### Client **SHOULD**
 
