@@ -1713,6 +1713,8 @@ To resume, a client includes a per-channel `since` cursor in `subscribe`. The pr
 }
 ```
 
+Replay sends each event with the message's **current** state, not the state it had when the event happened. A replayed `message.created` or `message.updated` **MUST** carry the message as it now stands, so a message edited after the event replays in its edited form, and a message deleted since replays as a `message.created` (and any `message.updated`) carrying the tombstone, followed by its `message.deleted`. Each event keeps its own position and `cursor`. Providers therefore need not keep earlier versions of a message to serve a replay.
+
 If the gap exceeds what the provider will replay, the provider **MUST** signal truncation (RECOMMENDED: `"truncated": ["chn_general"]` in the `subscribed` ack) so the client falls back to REST history (§7.2) to backfill. Ephemeral events (typing, presence) are **not** replayed.
 
 #### Sending messages
@@ -1848,17 +1850,26 @@ An article's author retitles it and replaces its tags, leaving its body unchange
 { "id": "cli_211", "type": "message.update", "data": { "groupId": "grp_1", "channelId": "chn_blog", "messageId": "msg_3", "title": "Welcome to the guild (updated)", "tags": ["#intro", "#faq"] } }
 ```
 
-**Deleting** is a soft **tombstone**: the message `id` is retained, `content` is cleared, and `deletedAt` is set, so reply references (§5.3) and resume cursors (§7.1) stay valid. The **author** or a member with the `moderate` role may delete. A successful delete fans out `message.deleted`:
+**Deleting** is a soft **tombstone**: the message `id` is retained, `content` is cleared, and `deletedAt` is set, so reply references (§5.3) and resume cursors (§7.1) stay valid. The **author** or a member who holds the group's `moderate` permission (§5.2, §5.7; the owner always holds it) may delete; otherwise the provider **MUST** reject with `403`. A successful delete fans out `message.deleted`:
 ```json
 { "id": "evt_221", "type": "message.deleted", "ts": "2026-01-01T12:06:00Z", "data": { "groupId": "grp_1", "channelId": "chn_general", "messageId": "msg_999", "deletedAt": "2026-01-01T12:06:00Z" } }
 ```
 
 Providers **MAY** reap tombstones after a retention period. Clients **MUST** render a tombstoned message as deleted rather than hiding it outright, to preserve thread/reply context.
 
+**Edits and deletes of a tombstone.** A tombstone cannot be edited, and deleting it again changes nothing. The provider handles an edit or a delete in this order and stops at the first step that answers, as for a create:
+
+1. **Authentication:** `401`. An edit whose body is not a JSON object is rejected with `400` here.
+2. **Visibility:** a channel the caller cannot read, or a group or channel that does not exist, is `404` (above).
+3. **The message:** a `messageId` that names no message in the channel, including a reaped tombstone, is `404`. For an **edit**, a tombstone is `404` too: the provider **MUST** answer an edit of a soft-deleted message as for a missing one (`404`, `not_found` over WebSocket).
+4. **Permission:** the author and `editUntil` rules for an edit, the author or `moderate` rule for a delete: `403`.
+5. **A repeated delete:** a delete of a message that is already a tombstone **MUST** succeed without changing it: `204` over REST, and the provider **MUST NOT** fan out a second `message.deleted`. Over WebSocket the requesting connection alone receives a `message.deleted` for the tombstone, with the command's `id` in `correlationId` and no `cursor`; as with the answer to a duplicate create, it is not a timeline event and clients **MUST NOT** store it as a resume point.
+6. **Everything else**, for an edit: the `400` rules above.
+
 **REST equivalents** (for non-WS clients) operate on the same rules:
 
-* `PATCH /api/groups/{groupId}/channels/{channelId}/messages/{messageId}` — body `MessageUpdate` (`message-update-request.json`), as above; returns the updated message (with `editedAt`).
-* `DELETE /api/groups/{groupId}/channels/{channelId}/messages/{messageId}` — returns `204 No Content`; the message becomes a tombstone.
+* `PATCH /api/groups/{groupId}/channels/{channelId}/messages/{messageId}` — body `MessageUpdate` (`message-update-request.json`), as above; returns the updated message (with `editedAt`). A tombstone is `404`.
+* `DELETE /api/groups/{groupId}/channels/{channelId}/messages/{messageId}` — returns `204 No Content`; the message becomes a tombstone. A delete of a tombstone is also `204`, and fans out nothing.
 
 #### Reactions
 
@@ -1880,6 +1891,16 @@ The provider creates the `Reaction` (assigning `id`, `author`, `createdAt`) and 
 
 The `PUT` body is optional. An absent body, or an empty one, is valid and is not checked against the schema; a JSON body is checked against `reaction-put-request.json`, and `{}` is valid. `unicode` and `image` (an `https` URL) are each optional, and neither is tied to the other or to `key`, as in `reaction.add`: `key` alone identifies the reaction. A body that does not match the schema is `400` (`bad_request`). The same body applies to the DM route (§7.4) and to its federation route, `PUT /api/federation/dms/{dmId}/messages/{messageId}/reactions/{key}` (§8.3).
 
+Order of checks. The provider handles a reaction add or remove (either transport) in this order and stops at the first step that answers, as for a create:
+
+1. **Authentication:** `401`.
+2. **Visibility:** a channel the caller cannot read, or a group or channel that does not exist, is `404` (§11.3).
+3. **Permission**, for an add only: the channel's `react` permission (§5.2.1): `403`. Removing your own reaction needs no permission beyond reading the channel.
+4. **The message:** a `messageId` that names no message in the channel, including a reaped tombstone, is `404`. An **add** to a soft-deleted message **MUST** also be answered `404` (`not_found` over WebSocket), as for a missing message: a tombstone takes no new reactions. A **remove** on a tombstone is not refused: it proceeds to the next step.
+5. **The change itself:** for an add, the `400` body rules above, then the add (idempotent, above). For a remove, the provider deletes the actor's reaction with that `key` if it holds one, and fans out `reaction.removed`.
+
+**A remove that removes nothing.** When the actor holds no reaction with that `key` on the message (it never reacted, it already removed the reaction, or the message is a tombstone without one), the remove is a no-op and still succeeds. Over REST the provider **MUST** answer `204`. Over WebSocket it **MUST** send the requesting connection alone a `reaction.removed` (`{ groupId, channelId, messageId, key, author }`, with `author` the actor) carrying the command's `id` in `correlationId`, and **MUST NOT** fan it out to anyone else. This mirrors the idempotent add (above): the requester gets its answer, and others see nothing, since nothing changed.
+
 #### Typing indicators
 
 Client → Server:
@@ -1899,6 +1920,13 @@ Server → Subscribers:
 
 Typing indicators are soft state. A provider **MUST** auto-expire a `start` after a short period without a refreshing `typing.start` (RECOMMENDED 6 seconds) and **MUST** emit a `stop` when a typing user disconnects, so a dropped connection never leaves an indicator stuck.
 
+Who may type, and what the requester gets back:
+
+* A `typing.start` or `typing.stop` naming a channel that does not exist, or one the actor cannot read, **MUST** be answered with an `error` (`not_found`, `correlationId` = the command's `id`), as for a missing channel (§11.3).
+* `typing.start` requires read access to the channel **and** at least one `post:<type>` grant there (§5.2.1), for any `type`. A reply-restricted actor holds a `post` grant, so it may type. An actor who can read the channel but holds no `post:<type>` grant **MUST** be answered with an `error` (`forbidden`, `403`, `correlationId` = the command's `id`), and nothing is fanned out.
+* A successful `typing.start` is not acknowledged: the provider fans out `channel.typing` and sends the requester no event carrying its `correlationId`.
+* A `typing.stop` from an actor with no active `start` in the channel (it never started, or the `start` already expired or was stopped) is a no-op: the provider sends nothing, to subscribers or to the requester.
+
 #### Heartbeat & liveness
 
 Either party **MAY** send a `ping`; the receiver **MUST** reply with `pong`, echoing the ping's `id` in `correlationId`. Providers **SHOULD** send a `ping` periodically (RECOMMENDED every 30 seconds) and **SHOULD** close a connection that has produced no traffic or `pong` within a timeout (RECOMMENDED 60 seconds), with close code `1000` (*Close codes*). This is an application-level heartbeat and does not rely on WebSocket protocol ping/pong frames, which many browser clients cannot observe.
@@ -1911,6 +1939,7 @@ Either party **MAY** send a `ping`; the receiver **MUST** reply with `pong`, ech
 #### Delivery, ordering & limits
 
 * **Ordering:** within a single channel, providers **MUST** deliver timeline events in an order consistent with their `cursor` values (monotonically non-decreasing). No ordering is guaranteed across different channels. The `message.created` answering a duplicate create carries no `cursor` and is not a timeline event, so this rule does not apply to it (see *Idempotency* above).
+* **The requester's own copy:** a connection that sends a timeline or reaction command (`message.create`, `message.update`, `message.delete`, `reaction.add`, `reaction.remove`) that succeeds **MUST** receive exactly one copy of the resulting event (`message.created`, `message.updated`, `message.deleted`, `reaction.added` or `reaction.removed`), carrying the command's `id` in `correlationId`. This holds when the connection can read the channel but has not subscribed to it; a connection that is subscribed gets that same single copy, never a second, uncorrelated one. The other subscribed connections, including the actor's own, get the event as usual, without `correlationId`.
 * **Delivery:** delivery is **at-least-once**. Combined with resume (replay may re-send the boundary event) a client **MAY** see a duplicate, so clients **MUST** de-duplicate by message `id` among the events of one provider (local ids are unique only within the issuing provider, §2.2, so de-duplication never spans providers). The `(author, channelId, clientMessageId)` idempotency rule above prevents duplicate *creation*.
 * **Limits:** providers **MAY** cap the number of subscriptions and the command rate per connection. On exceeding a limit a provider **SHOULD** reply with an `error` (`code: "too_many_requests"` for the command rate, `code: "subscription_limit"` for the subscription cap, applied to `subscribe` as described under *Subscriptions*, including the early refusal of an oversized list; §7.3) and **MAY** close the connection (`1008` for repeated abuse, *Close codes*).
 
@@ -1930,9 +1959,11 @@ Paging parameters (Normative — they apply to every paginated OFSCP endpoint un
 * **`page.nextCursor`** — present only when more items exist. To continue, repeat the request with `cursor=nextCursor` and the **same** `direction`.
 * **`page.prevCursor`** — marks the first item of the page. To walk back the other way, send `cursor=prevCursor` with the **opposite** `direction`.
 
-Cursors are only valid on the endpoint (and, for messages, the channel or DM) that issued them.
+A cursor is valid only on the endpoint that issued it (and, for messages, only for the same channel or DM), with one exception: a channel's timeline cursors share one space (§7.1, *Resuming after a disconnect*). The `cursor` of a timeline event in a channel is valid as the `cursor` of that channel's history (`GET …/messages`), and a history `nextCursor` or `prevCursor` is valid as that channel's `subscribe.since` cursor.
 
 Channel history is served under effective read access (§11.3): an unsigned request is an anonymous viewer (§4.5), and a channel the caller cannot read is answered `404`, as one that does not exist.
+
+Channel history and the reply listing (*Replies*, below) hold **messages only**: every item **MUST** be a message (§5.3) of type `message`, `memo` or `article`, tombstones included (§7.1, *Editing & deleting messages*), in the timeline's order. Reactions are not timeline items and **MUST NOT** appear in either listing; a client gets a message's reactions only from its `…/reactions` listing (§7.1, *Reactions*) and from `reaction.added` / `reaction.removed` events. Schema: `messages-page.json`.
 
 Response example:
 ```json
@@ -2678,7 +2709,12 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Serve a `Reaction` whose `reference.provider`, if present, is its own authority, since a reaction is stored with its message (§7.1)
 - [ ] Treat `(author, channelId, clientMessageId)` as idempotent, running only authentication, visibility and the actor's permission checks before the duplicate lookup and returning the existing message on a duplicate (over WebSocket as a `message.created` with no `cursor`); echo `clientMessageId` on the author's `message.created`, live or replayed, and on every create response (§7.1, §7.4)
 - [ ] Carry the full canonical `Message` in `message.created`, `message.updated` and `dm.message` (§7.1, §7.4)
-- [ ] Support message edit (author-only; within `editUntil` when set, with no limit when absent) replacing any of `content`, `attachments`, `tags`, `mentions` and the article fields, and tombstone delete (§7.1)
+- [ ] Support message edit (author-only; within `editUntil` when set, with no limit when absent) replacing any of `content`, `attachments`, `tags`, `mentions` and the article fields, and tombstone delete by the author or a holder of the group's `moderate` permission (§7.1)
+- [ ] Answer an edit of a tombstone `404` (`not_found`), and a repeated delete of one `204` with no second `message.deleted` fanned out (over WebSocket, a `message.deleted` with `correlationId` and no `cursor` to the requester alone), applying the §7.1 order of checks (§7.1)
+- [ ] Support channel reactions over `reaction.add`/`reaction.remove` and `PUT`/`DELETE …/reactions/{key}`, with the `…/reactions` listing, in the §7.1 order of checks: answer an add to a tombstone `404` (`not_found`); answer a remove on a tombstone, or one that removes nothing, `204`, and over WebSocket send that no-op's `reaction.removed` with `correlationId` to the requester alone, never fanned out (§7.1)
+- [ ] Send the connection that issued a successful timeline or reaction command exactly one copy of the resulting event, with `correlationId`, whether or not it is subscribed to the channel (§7.1)
+- [ ] Accept `typing.start` only from an actor who can read the channel and holds a `post:<type>` grant there (`not_found` for a missing or unreadable channel, `forbidden` otherwise), send no acknowledgement of a successful one, and send nothing for a `typing.stop` with no active `start` (§7.1)
+- [ ] Serve channel history and replies holding messages only, tombstones included, never reactions (§7.2)
 - [ ] Accept `text/plain` and `text/markdown` bodies for every message type; store the article fields `title`, `summary` and `cover` (rejecting a `cover` that names none of the message's attachments) and ignore them on other types; store `mentions` (§5.3) and, if the provider offers the §10.1 feed, take a message's mentions from it in place of text parsing when present (§10.1)
 - [ ] Support single-step media upload at `POST /api/media`, recording its `target` (default: this provider), setting `size` and `hash` from the bytes and `mime` per §5.8 (the declared type is allowed, but an inline type — `image/*` other than SVG, `video/*`, `audio/*` — only when the bytes confirm it, otherwise `application/octet-stream`), and `width`, `height` and `durationMs` from the bytes when they can be determined or from the uploader otherwise, and accepting an uploader's `thumbnail` part; if the provider offers pre-signed uploads, refuse one at completion when its inline `mime` is not confirmed by the bytes (§5.8)
 - [ ] Serve attachments as capability URLs: `https`, at least 128 bits of entropy, unlisted, fetchable unsigned, with the §3.4 CORS headers, from any host the provider chooses (§5.8)
@@ -2694,7 +2730,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Publish provider signing key(s) in discovery and sign provider-to-provider requests (§8.1)
 - [ ] Accept direct-WS connections from remote members — resolve remote keys via §4.6, enforce prior membership + tier at subscribe-time — and advertise `capabilities.federation.realtimeDelivery` (§8.5)
 - [ ] Support the follow list (`GET`/`POST`/`DELETE /api/me/follows`) as pointers only — no server-side feed compilation or content replication (§7.6)
-- [ ] Support WebSocket resume (`since` replay with per-message cursors) and the `ping`/`pong` heartbeat (§7.1)
+- [ ] Support WebSocket resume (`since` replay with per-message cursors, each replayed event carrying the message's current state, a since-deleted message replaying as a `message.created` with the tombstone followed by its `message.deleted`), accept a channel's event cursors as its REST history `cursor` and its history cursors as `since`, and support the `ping`/`pong` heartbeat (§7.1, §7.2)
 - [ ] Support real-time presence over WebSocket: `presence.subscribe`/`set`, `presence.update` fan-out, connection-derived online/offline, and §6.1 visibility filtering consistent with the REST presence endpoint (§7.5)
 - [ ] Support message fan-out + notification endpoints
 - [ ] Enforce tiers per channel and group, using the single effective-read-access rule (§11.3) on every surface, and end live subscriptions with `unsubscribed` (`reason: "access_revoked"`) when access is lost (§7.1)
