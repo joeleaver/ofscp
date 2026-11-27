@@ -139,7 +139,7 @@
         "token": {
           "type": "string",
           "minLength": 1,
-          "description": "The bearer secret carried by the join link; redeemed at POST /api/invites/{token}/redeem. Required in the creation response (invite-create-response.json); a provider may omit it everywhere else, e.g. to store only a hash (§5.6)."
+          "description": "The bearer secret carried by the join link; redeemed at POST /api/invites/{token}/redeem. Required in the creation response (invite-create-response.json); a provider may omit it everywhere else, e.g. to store only a digest of it (§5.6). Opaque, with at least 128 bits of entropy from a cryptographically secure random source (§5.6)."
         },
         "role": {
           "$ref": "#/$defs/Role",
