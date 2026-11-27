@@ -831,7 +831,7 @@ The client resolves `<id>` against the same message's `attachments` and shows th
 
 ### 5.4. Metadata Objects
 
-Metadata can be attached to most objects to implement custom features. Such features **MUST** provide a public JSON Schema and **MUST** be implemented in such a way that ignoring the metadata will still result in a readable experience. OFSCP v0.1 has no schema registry: a metadata object names its schema by URL in `schema`, and a consumer ignores a schema it does not know (§13).
+Metadata can be attached to most objects to implement custom features. Such features **MUST** provide a public JSON Schema and **MUST** be implemented in such a way that ignoring the metadata will still result in a readable experience. OFSCP v0.1 has no schema registry: a metadata object names its schema by URL in `schema`, and a consumer ignores a schema it does not know. Registry governance is future work (§13).
 
 ```json
 {
@@ -1049,7 +1049,7 @@ Removes the caller's own membership. **Response:** `204 No Content`. The `owner`
 
 #### GET /api/groups/{groupId}/members
 
-Lists members. **Authorization:** visible to group members; for `public`/`discoverable` groups providers **MAY** expose it publicly. Members who have hidden their membership (§6) **MAY** be omitted for unauthorized viewers. Paginated per §7.2. **Errors:** `404` (no such group); `403` when the caller may not see the list (a non-member, unless the provider exposes the list publicly); `401` for a signed request that fails §4.5.
+Lists members. **Authorization:** visible to group members; for `public`/`discoverable` groups providers **MAY** expose it publicly. Members who have hidden their membership (§6) **MAY** be omitted for unauthorized viewers. Paginated per §7.2. **Errors:** `404` (no such group); `403` when a signed caller may not see the list (a non-member, unless the provider exposes the list publicly); `401` for a signed request that fails §4.5. This route is not among the anonymous-reader routes of §4.5: an unsigned request gets `401` (§4.5 step 1), even where the provider exposes the list to non-members who sign.
 
 **Response (`200 OK`):**
 ```json
@@ -2687,7 +2687,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Handle an unsigned request to a route that accepts anonymous readers as an anonymous viewer (`public` access only, never `401`), keeping `401` for signed requests that fail §4.5 (§4.5)
 - [ ] Support the `private` tier
 - [ ] Expose `GET /api/tiers` endpoint
-- [ ] Store `metadata` as given, rejecting (`400`) an invalid metadata object (§5.4, §7.1)
+- [ ] On create, store `metadata` as given, rejecting (`400`) an invalid metadata object (§5.4, §7.1)
 
 ### Provider **SHOULD**
 
