@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/reaction-put-request.json",
+  "title": "OFSCP PUT …/reactions/{key} request body (v0.1)",
+  "description": "Optional body of the REST reaction add (§7.1 group messages, §7.4 DMs, §8.3 federation DMs). The body may be absent (not validated); a JSON body, possibly empty ({}), is validated against this schema; `unicode` and `image` are each optional, independent of each other and of the path's `key`, as in the WS reaction.add command.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "unicode": { "type": "string" },
+    "image": { "$ref": "./defs/common.json#/$defs/HttpsUri" }
+  }
+}

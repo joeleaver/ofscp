@@ -66,6 +66,9 @@ async function main() {
     ['tests/group.sample.json', 'schemas/v0.1/group.json'],
     ['tests/group-membership.sample.json', 'schemas/v0.1/group.json'],
     ['tests/channel.sample.json', 'schemas/v0.1/channel.json'],
+    ['tests/channel-list.sample.json', 'schemas/v0.1/channel-list.json'],
+    ['tests/reaction-put-request.sample.json', 'schemas/v0.1/reaction-put-request.json'],
+    ['tests/reaction-put-request.empty.sample.json', 'schemas/v0.1/reaction-put-request.json'],
     ['tests/group-create-request.sample.json', 'schemas/v0.1/group-create-request.json'],
     ['tests/group-update-request.sample.json', 'schemas/v0.1/group-update-request.json'],
     ['tests/channel-create-request.sample.json', 'schemas/v0.1/channel-create-request.json'],
@@ -222,7 +225,9 @@ async function main() {
     // and `data` is always an object.
     ['tests/ws-ping.data-not-object.invalid.json', 'schemas/v0.1/ws/ping.json'],
     // §4.3.2: `public_key` is the raw 32-byte key, not a DER SubjectPublicKeyInfo.
-    ['tests/device-key-registration.spki.invalid.json', 'schemas/v0.1/device-key-registration.json']
+    ['tests/device-key-registration.spki.invalid.json', 'schemas/v0.1/device-key-registration.json'],
+    // §7.1: a reaction `image` is an https URL.
+    ['tests/reaction-put-request.http-image.invalid.json', 'schemas/v0.1/reaction-put-request.json']
   ];
 
   for (const [samplePath, schemaPath] of rejectCases) {

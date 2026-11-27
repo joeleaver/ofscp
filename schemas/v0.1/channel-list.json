@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/channel-list.json",
+  "title": "OFSCP GET /api/groups/{groupId}/channels response (v0.1)",
+  "description": "The group's channels the caller can read (§5.5, §11.3). Not paginated: there is no `page` object.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": { "$ref": "./defs/groups.json#/$defs/Channel" }
+    }
+  }
+}
