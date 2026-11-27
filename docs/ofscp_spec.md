@@ -973,6 +973,8 @@ Deletes a channel.
 
 An **invite** is a join link carrying a secret `token`. Redeeming it joins the issuing group (or a specific channel) without per-person approval — useful for `invite`/`request` groups (§5.2). An invite **MAY** be single-use or multi-use (`maxUses`), time-limited (`expiresAt`), and **MAY** allow provisioning a provider-local guest account (`grantsGuest`, §4.8).
 
+The `token` is a **bearer secret**: whoever holds it can redeem the invite. The provider **MUST** include it in the `201` response that creates the invite, and **MAY** omit it from every other `Invite` it serves, including the listing below, so that it can keep only a hash of the token. An invite is revoked by its `id` (`DELETE …/invites/{inviteId}`), not its token. Providers **SHOULD** store tokens so that a leak of their database does not reveal them, for example as a hash.
+
 #### POST /api/groups/{groupId}/invites
 
 Creates an invite. **Authorization:** group `manage` role.
@@ -989,11 +991,11 @@ All fields are optional. The invite's `role` applies only to full accounts redee
 * The **subset rule** (§5.7) binds the role the invite grants through `/redeem` (its `role`, or `member` when absent): the creator **MUST** hold every permission that role holds, otherwise the provider **MUST** reject with **`403`**. An invite cannot hand out more power than its creator has.
 * A provider that does not support guest accounts (§4.8) **MAY** reject `grantsGuest: true` with **`400`**. If it creates such an invite instead, the invite still works through `/redeem` for full accounts, and only `/guest` is refused (`403`, below).
 
-**Response (`201 Created`):** the created `Invite` (including `token`). **Errors:** `400`, `403`. The shareable join link is provider-defined but **SHOULD** embed the token, e.g. `https://{provider}/invite/{token}`.
+**Response (`201 Created`):** the created `Invite`, which **MUST** include `token` (`invite-create-response.json`). **Errors:** `400`, `403`. The shareable join link is provider-defined but **SHOULD** embed the token, e.g. `https://{provider}/invite/{token}`.
 
 #### GET /api/groups/{groupId}/invites
 
-Lists the group's invites. **Authorization:** group `manage` role.
+Lists the group's invites. **Authorization:** group `manage` role. The provider **MAY** omit each invite's `token` (above).
 
 #### DELETE /api/groups/{groupId}/invites/{inviteId}
 
@@ -1010,7 +1012,9 @@ The provider **MUST** check the invite first, whoever the caller is: an unknown 
 { "groupId": "grp_1", "channelId": "chn_general", "role": "member" }
 ```
 
-If the invite is valid and the caller is already a member of the group, the owner included, the provider **MUST** answer **`200 OK`** with this body carrying the invite's `channelId` (when it has one) and the caller's **current** `role`, and **MUST NOT** change the role or consume a use of the invite (`uses` is unchanged). The invite's `role` never changes an existing member's role: that goes through `PATCH /api/groups/{groupId}/members/{userRef}` and its subset rule (§5.7).
+If the invite is valid and the caller is already a member of the group, the owner included, the provider **MUST** answer **`200 OK`** with this body carrying the invite's `channelId` (when it has one and that channel still exists, below) and the caller's **current** `role`, and **MUST NOT** change the role or consume a use of the invite (`uses` is unchanged). The invite's `role` never changes an existing member's role: that goes through `PATCH /api/groups/{groupId}/members/{userRef}` and its subset rule (§5.7).
+
+If the invite's `channelId` names a channel that has since been deleted, the redemption still succeeds: the caller joins the group, and the response omits `channelId`.
 
 **Errors:** `404` (unknown/expired token), `409` (`maxUses` exhausted), `403` (provider/group policy forbids).
 
@@ -1034,7 +1038,7 @@ Redeems an invite by provisioning a **guest account** (§4.8). Requires the invi
 }
 ```
 
-The guest joins with role `guest`, whatever the invite's `role` (§4.8). The provider binds the device key to the new guest actor; all subsequent requests are signed (§4.4). **Errors:** `404`, `409`, `403` (e.g. `grantsGuest` is false or guests unsupported).
+The guest joins with role `guest`, whatever the invite's `role` (§4.8). As for `/redeem`, an invite whose `channelId` names a channel that has since been deleted still joins the guest to the group. The provider binds the device key to the new guest actor; all subsequent requests are signed (§4.4). **Errors:** `404`, `409`, `403` (e.g. `grantsGuest` is false or guests unsupported).
 
 ### 5.7. Membership
 
@@ -2732,9 +2736,9 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] List the owner among the members with role `owner`, keep `joinedAt` across role changes and ownership transfers, and keep the member list's order stable for cursor paging (§5.7)
 - [ ] Answer a repeat `join` under the `request` policy with `202` and the caller's existing pending `JoinRequest`, unchanged; answer `leave` from a non-member with `404` (and from the owner with `409`) (§5.7)
 - [ ] Gate join-request approve and deny on `manage` or `moderate`, without the subset rule; give an approved requester role `member`, and answer an approval for someone already a member with `200` and the existing `Member`, marking the request `approved` (§5.7)
-- [ ] On invite creation, reject a `role` that is `owner` or neither canonical nor in the group's `roles`, and a `channelId` that is not a channel of the group, with `400`, and an invite whose role holds a permission the creator lacks with `403` (§5.6)
-- [ ] On `redeem`, check the invite first (`404` unknown or expired, `409` exhausted, whoever the caller is); answer a valid invite redeemed by a caller who is already a member (the owner included) with `200`, the invite's `channelId` and their current role, changing no role and consuming no use of the invite (§5.6)
-- [ ] Give a guest provisioned through `/invites/{token}/guest` role `guest`, whatever the invite's `role` (§4.8, §5.6)
+- [ ] On invite creation, reject a `role` that is `owner` or neither canonical nor in the group's `roles`, and a `channelId` that is not a channel of the group, with `400`, and an invite whose role holds a permission the creator lacks with `403`; return the invite's `token` in the `201` (it may be omitted elsewhere, including the invite listing), and store tokens so that a database leak does not reveal them, e.g. hashed (§5.6)
+- [ ] On `redeem`, check the invite first (`404` unknown or expired, `409` exhausted, whoever the caller is); answer a valid invite redeemed by a caller who is already a member (the owner included) with `200`, the invite's `channelId` and their current role, changing no role and consuming no use of the invite; let a redemption whose invite names a since-deleted channel succeed, omitting `channelId` (§5.6)
+- [ ] Give a guest provisioned through `/invites/{token}/guest` role `guest`, whatever the invite's `role`, and join it to the group even when the invite names a since-deleted channel (§4.8, §5.6)
 - [ ] Support message creation of every type (`message`, `memo`, `article`) with `attachments`, `reference`, `tags` and `metadata`, over both `message.create` and `POST …/messages`, gated by `post:<type>` and by `replyOnly` / `replyOnlyTo` (which only a valid reply, `reference.type` `"reply"` naming an existing message in the channel, satisfies), answering `404` for a channel the actor cannot read (§5.2.1, §7.1)
 - [ ] Treat a `reference.provider` as a canonical authority (§2.2), and one equal to its own authority as absent; reject (`400`) a channel reply whose `provider` is not the channel's own provider (§7.1, §7.2)
 - [ ] Serve a `Reaction` whose `reference.provider`, if present, is its own authority, since a reaction is stored with its message (§7.1)

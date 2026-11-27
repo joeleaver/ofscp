@@ -126,7 +126,7 @@
     "Invite": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["id", "groupId", "token", "uses", "createdBy", "createdAt"],
+      "required": ["id", "groupId", "uses", "createdBy", "createdAt"],
       "description": "A join link / invite token granting membership to a group (optionally a specific channel).",
       "properties": {
         "id": { "$ref": "./common.json#/$defs/LocalId" },
@@ -134,12 +134,12 @@
         "channelId": {
           "type": "string",
           "minLength": 1,
-          "description": "Optional: invite targets a specific channel rather than the whole group. Must name a channel of the group (§5.6)."
+          "description": "Optional: invite targets a specific channel rather than the whole group. Must name a channel of the group when the invite is created (§5.6); the channel may since have been deleted."
         },
         "token": {
           "type": "string",
           "minLength": 1,
-          "description": "The secret carried by the join link; redeemed at POST /api/invites/{token}/redeem."
+          "description": "The bearer secret carried by the join link; redeemed at POST /api/invites/{token}/redeem. Required in the creation response (invite-create-response.json); a provider may omit it everywhere else, e.g. to store only a hash (§5.6)."
         },
         "role": {
           "$ref": "#/$defs/Role",
