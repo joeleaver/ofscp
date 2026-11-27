@@ -504,7 +504,7 @@ A **guest account** is a lightweight, **provider-local** account created by rede
 
 A guest account:
 
-* Is created on the **group's** provider and bound to the group it joined; it **MAY** carry an `expiresAt` after which the provider **SHOULD** revoke it.
+* Is created on the **group's** provider and bound to the group it joined; it **MAY** carry an `expiresAt` after which the provider **SHOULD** revoke it. The binding outlives the membership: a guest who left or was removed from its group (a removal is not a ban, §13) **MAY** rejoin **that** group as a removed full member could — by redeeming a valid invite to it through `POST /api/invites/{token}/redeem` (§5.6), or through `POST /api/groups/{groupId}/join` under the group's `joinPolicy` (§5.7) — always with role `guest`, whatever the invite's `role` (so the dead-role check of §5.6 does not apply to it). A guest's attempt to join or redeem into **any other** group is refused with **`403`**.
 * Authenticates exactly like a normal account: the guest registers an Ed25519 **device key** during provisioning (§5.6), and all subsequent requests are signed (§4.4). There is **no password**; the device key is the only credential.
 * Is represented by a `UserProfile` with `"guest": true` (and optional `expiresAt`). Its role within the group is always `guest`, whatever the invite's `role` (§5.6); whether guests may post is governed by the group's permission map (§5.2).
 * Is **not federated.** A guest actor **MUST NOT** be used for cross-provider requests, and remote providers **MAY** refuse to resolve or accept guest actors. The provider **MAY** still serve the guest's public key at the keys endpoint (§4.6) so that local verification works.
@@ -1018,9 +1018,11 @@ The provider **MUST** check the invite first, whoever the caller is: an unknown 
 
 If the invite is valid and the caller is already a member of the group, the owner included, the provider **MUST** answer **`200 OK`** with this body carrying the invite's `channelId` (when it has one and that channel still exists, below) and the caller's **current** `role`, and **MUST NOT** change the role or consume a use of the invite (`uses` is unchanged). The invite's `role` never changes an existing member's role: that goes through `PATCH /api/groups/{groupId}/members/{userRef}` and its subset rule (§5.7).
 
+If the invite's `role` names a role that is neither canonical nor present in the group's `roles` catalogue (§5.2) — typically a custom role deleted after the invite was created — a caller who is not a member is refused with **`403`** (`forbidden`), and the provider **MUST NOT** consume a use or create a membership; a group manager issues a new invite instead. (An existing member is answered as in the previous paragraph: the invite's `role` is never applied to them.)
+
 If the invite's `channelId` names a channel that has since been deleted, the redemption succeeds as above (a non-member joins the group; an existing member is answered as in the previous paragraph), and the `200` omits `channelId`.
 
-**Errors:** `404` (unknown/expired token), `409` (`maxUses` exhausted), `403` (provider/group policy forbids).
+**Errors:** `404` (unknown/expired token), `409` (`maxUses` exhausted), `403` (provider/group policy forbids, an invite whose `role` the group no longer defines, or a guest redeeming an invite to a group other than its own, §4.8).
 
 #### POST /api/invites/{token}/guest
 
