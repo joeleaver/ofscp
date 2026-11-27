@@ -1914,7 +1914,9 @@ Order of checks. The provider handles a reaction add or remove (either transport
 4. **The message:** a `messageId` that names no message in the channel, including a reaped tombstone, is `404`. An **add** to a soft-deleted message **MUST** also be answered `404` (`not_found` over WebSocket), as for a missing message: a tombstone takes no new reactions. A **remove** on a tombstone is not refused: it proceeds to the next step.
 5. **The change itself:** for an add, the `400` body rules above, then the add (idempotent, above). For a remove, the provider deletes the actor's reaction with that `key` if it holds one, and fans out `reaction.removed`.
 
-**A remove that removes nothing.** When the actor holds no reaction with that `key` on the message (it never reacted, it already removed the reaction, or the message is a tombstone without one), the remove is a no-op and still succeeds. Over REST the provider **MUST** answer `204`. Over WebSocket it **MUST** send the requesting connection alone a `reaction.removed` (`{ groupId, channelId, messageId, key, author }`, with `author` the actor) carrying the command's `id` in `correlationId`, and **MUST NOT** fan it out to anyone else. This mirrors the idempotent add (above): the requester gets its answer, and others see nothing, since nothing changed.
+**A repeated add.** When the actor already holds a reaction with that `key` on the message, the add changes nothing: the stored `Reaction` keeps its `id`, `createdAt`, `unicode` and `image`, and those of the repeat are not applied. Over REST the provider answers as for a first add, returning the existing `Reaction`. Over WebSocket it **MUST** send the requesting connection alone a `reaction.added` carrying the existing `Reaction` and the command's `id` in `correlationId`, and **MUST NOT** fan it out to anyone else. This matches the answer to a duplicate create (*Idempotency*, above).
+
+**A remove that removes nothing.** When the actor holds no reaction with that `key` on the message (it never reacted, it already removed the reaction, or the message is a tombstone without one), the remove is a no-op and still succeeds. Over REST the provider **MUST** answer `204`. Over WebSocket it **MUST** send the requesting connection alone a `reaction.removed` (`{ groupId, channelId, messageId, key, author }`, with `author` the actor) carrying the command's `id` in `correlationId`, and **MUST NOT** fan it out to anyone else. This mirrors the repeated add (above): the requester gets its answer, and others see nothing, since nothing changed.
 
 #### Typing indicators
 
@@ -1935,7 +1937,7 @@ Server → Subscribers:
 
 Typing indicators are soft state. A provider **MUST** auto-expire a `start` after a short period without a refreshing `typing.start` (RECOMMENDED 6 seconds) and **MUST** emit a `stop` when a typing user disconnects, so a dropped connection never leaves an indicator stuck.
 
-Who may type, and what the requester gets back:
+Who may type in a channel, and what the requester gets back (a DM has its own rule, §7.4, *Reactions, replies & typing*):
 
 * A `typing.start` or `typing.stop` naming a channel that does not exist, or one the actor cannot read, **MUST** be answered with an `error` (`not_found`, `correlationId` = the command's `id`), as for a missing channel (§11.3).
 * `typing.start` requires read access to the channel **and** at least one `post:<type>` grant there (§5.2.1), for any `type`. A reply-restricted actor holds a `post` grant, so it may type. An actor who can read the channel but holds no `post:<type>` grant **MUST** be answered with an `error` (`forbidden`, `403`, `correlationId` = the command's `id`), and nothing is fanned out.
@@ -1974,7 +1976,7 @@ Paging parameters (Normative — they apply to every paginated OFSCP endpoint un
 * **`page.nextCursor`** — present only when more items exist. To continue, repeat the request with `cursor=nextCursor` and the **same** `direction`.
 * **`page.prevCursor`** — marks the first item of the page. To walk back the other way, send `cursor=prevCursor` with the **opposite** `direction`.
 
-A cursor is valid only on the endpoint that issued it (and, for messages, only for the same channel or DM), with one exception: a channel's timeline cursors share one space (§7.1, *Resuming after a disconnect*). The `cursor` of a timeline event in a channel is valid as the `cursor` of that channel's history (`GET …/messages`), and a history `nextCursor` or `prevCursor` is valid as that channel's `subscribe.since` cursor.
+A cursor is valid only on the endpoint that issued it (and, for messages, only for the same channel or DM), with one exception: a channel's timeline cursors share one space (§7.1, *Resuming after a disconnect*), and so do a DM conversation's on the provider that issued them (§7.4). The `cursor` of a timeline event in a channel is valid as the `cursor` of that channel's history (`GET …/messages`) and of its reply listing (*Replies*, below), and a `nextCursor` or `prevCursor` from either listing is valid as that channel's `subscribe.since` cursor. Likewise, on one provider, the `cursor` of a `dm.message` event, a `nextCursor` or `prevCursor` from `GET /api/dms/{dmId}/messages`, and one from that conversation's reply listing (§7.4, *Reactions, replies & typing*) are interchangeable among those listings and that conversation's `subscribe.since`. A cursor issued by one participant's provider is never valid on the other's.
 
 Channel history is served under effective read access (§11.3): an unsigned request is an anonymous viewer (§4.5), and a channel the caller cannot read is answered `404`, as one that does not exist.
 
@@ -2172,7 +2174,7 @@ When a DM is delivered to the user's inbox, the provider emits `dm.message`:
 }
 ```
 
-`data.message` is the full canonical `Message` (§5.3), the same object that `GET /api/dms/{dmId}/messages` returns, and **MAY** carry `clientMessageId`. Implicit delivery of `dm.message` reaches only the recipient, since only their inbox stores the message; the sender, when on another provider, receives it only through a `dmId` subscription there (above). Editing and deleting DMs follow the same author/tombstone rules as §7.1, applied against the recipient's stored copy.
+`data.message` is the full canonical `Message` (§5.3), the same object that `GET /api/dms/{dmId}/messages` returns, and **MAY** carry `clientMessageId`. Implicit delivery of `dm.message` reaches only the recipient, since only their inbox stores the message; the sender, when on another provider, receives it only through a `dmId` subscription there (above). Editing and deleting DMs follow the same author/tombstone rules as §7.1, applied against the recipient's stored copy (*Edits & deletes*, below).
 
 **Edits and deletes are re-sent as `dm.message`.** There is no separate DM update event: after an edit or delete, the provider emits `dm.message` again with the same `message.id`, carrying the updated `Message` (with `editedAt` set after an edit; with `deletedAt` set and `content` cleared after a delete). Clients **MUST** treat a `dm.message` whose `message.id` they already hold **from the same provider** as a replacement of that message, not a new one.
 
@@ -2187,6 +2189,8 @@ DMs reuse the message object of §5.3, so they also support reactions (§7.1), r
 * `PUT /api/dms/{dmId}/messages/{messageId}/reactions/{key}` — add your reaction (optional body `{ "unicode": "…", "image": "…" }`); idempotent (at most one reaction per `key` per message per user).
 * `DELETE /api/dms/{dmId}/messages/{messageId}/reactions/{key}` — remove your reaction. `204 No Content`.
 * `GET /api/dms/{dmId}/messages/{messageId}/reactions` — paginated list of `Reaction` objects for the message (history & late joiners), mirroring §7.1.
+
+A DM reaction add or remove follows the §7.1 order of checks and its no-op rules, with the conversation in place of the channel: a non-participant gets **`404`** (*Non-participants answer as unknown*, above), and no group permission (such as `react`, §5.2.1) applies. A `PUT` on a tombstoned message is **`404`**; a `DELETE` on a tombstoned message, or one that removes nothing, is **`204`** and emits no `dm.reaction`. A repeated `PUT` of a reaction the actor already holds returns the existing `Reaction` and emits no `dm.reaction` (§7.1, *A repeated add*).
 
 Instead of (or as well as) the listing endpoint, a provider **MAY** embed a message's reactions inline: in `GET /api/dms/{dmId}/messages`, each message **MAY** carry a `reactions` array of `Reaction` objects ordered by `createdAt`, omitted when empty. Clients **MUST** accept either form; live changes always arrive as `dm.reaction` events, never inside `dm.message`.
 
@@ -2206,7 +2210,11 @@ The provider emits a `dm.reaction` event mirroring the channel `reaction.added`/
 }
 ```
 
-**Edits & deletes.** Editing and deleting a DM message follow the **same storage-follows-message rule** as reactions: the message lives only on the provider that holds it (the recipient's inbox, §8.3). To edit or delete a message the actor **sent**, the author's client signs (§4.4) the `PATCH` (body `MessageUpdate`, as in §7.1) or `DELETE` and sends it directly to that message's home provider, over the same client→provider delivery path as DM-send and DM-reaction. No provider forwards it. Only the **original author** may edit or delete, and the provider applies the §7.1 author/tombstone and edit rules against its stored copy (including the attachment checks of §5.8 for an edit that replaces `attachments`) and emits the resulting `dm.message` update to its local participant's connections and to the conversation's subscribers (*Real-time*, above).
+**Edits & deletes.** Editing and deleting a DM message follow the **same storage-follows-message rule** as reactions: the message lives only on the provider that holds it (the recipient's inbox, §8.3). To edit or delete a message the actor **sent**, the author's client signs (§4.4) the `PATCH` (body `MessageUpdate`, as in §7.1) or `DELETE` and sends it directly to that message's home provider, over the same client→provider delivery path as DM-send and DM-reaction. No provider forwards it. Only the **original author** may edit or delete, and the provider applies the §7.1 author/tombstone and edit rules against its stored copy (including the attachment checks of §5.8 for an edit that replaces `attachments`) and emits the resulting `dm.message` update to its local participant's connections and to the conversation's subscribers (*Real-time*, above). In a DM those rules come down to the following:
+
+* Only the original author may edit or delete a message. There is no `moderate` permission (or any other group permission, §5.2.1) in a DM, so a participant who is not the author gets **`403`** (*Non-participants answer as unknown*, above).
+* A `PATCH` of a tombstoned message is **`404`**, as in §7.1.
+* A repeated `DELETE` of a tombstone succeeds without changing it: **`204`**, and the provider **MUST NOT** emit a second `dm.message` for it. DM edits and deletes have no WebSocket command, so §7.1's answer to a repeated delete over WebSocket does not arise.
 
 **Replies.** Threading works as in §7.2: a reply carries `reference.type === "reply"` with `reference.id` set to the parent DM message's `id`, and the parent is identified by (`reference.provider`, `reference.id`) (§7.2). Because each message is stored only in its recipient's inbox, a reply and its parent are often held by different providers: when Ada replies to a message Erin sent her, the parent is in Ada's inbox on Ada's provider, while the reply is delivered to Erin's provider. The replying client **MUST** set `reference.provider` to the authority of the provider holding the parent whenever that is not the provider it delivers the reply to. The provider that receives the reply:
 
@@ -2234,7 +2242,7 @@ The parent is (`provider`, `{messageId}`): the optional `provider` query paramet
 }
 ```
 
-Typing is soft state with the same auto-expiry and disconnect rules as §7.1.
+Typing is soft state with the same auto-expiry and disconnect rules as §7.1. Any participant of the conversation may type; group permissions, including the `post:<type>` grants that channel typing needs (§5.2.1), do not apply in a DM. A `typing.start` or `typing.stop` naming a `dmId` of which the actor is not a participant **MUST** be answered with an `error` (`not_found`, `correlationId` = the command's `id`), per *Non-participants answer as unknown* (above). As in a channel, a successful `typing.start` is not acknowledged (the requester gets no event carrying its `correlationId`), and a `typing.stop` with no active `start` in the conversation is a no-op that sends nothing.
 
 ### 7.5. Real-time presence
 
@@ -2396,7 +2404,7 @@ The local DM lifecycle (conversation id derivation, listing, reading, real-time)
 * **Verification:** The receiving provider **MUST** reject the delivery with **`400`** when `{dmId}` does not equal the id derived from `{author, recipient}`, preventing delivery into a conversation the author is not part of.
 * **Storage:** The recipient's provider stores the message in the recipient's inbox and emits `dm.message` to the recipient's subscribers (§7.4).
 * **Reactions (OPTIONAL):** A DM reaction is stored alongside its target message — i.e. on the provider that holds that message (the source of truth above). Add/remove therefore follow the **same client→provider delivery path as the DM message**: the reacting client signs (§4.4) and delivers to the message's home provider (e.g. `PUT|DELETE /api/federation/dms/{dmId}/messages/{messageId}/reactions/{key}`; the `PUT` takes the optional body of §7.1, `reaction-put-request.json`), which stores it and emits `dm.reaction` (§7.4). No sender copy.
-* **Edits & deletes (OPTIONAL):** A DM message edit/delete is likewise applied on the provider that holds the message (the source of truth above), so editing/deleting a message the actor **sent** follows the **same client→provider delivery path as the DM message**: the author signs (§4.4) and delivers to the message's home provider (e.g. `PATCH|DELETE /api/federation/dms/{dmId}/messages/{messageId}`; the `PATCH` body is `MessageUpdate`, `message-update-request.json`, §7.1), which applies the §7.1 author/tombstone rules and emits the resulting `dm.message` update (§7.4). Only the original author may do so. No sender copy.
+* **Edits & deletes (OPTIONAL):** A DM message edit/delete is likewise applied on the provider that holds the message (the source of truth above), so editing/deleting a message the actor **sent** follows the **same client→provider delivery path as the DM message**: the author signs (§4.4) and delivers to the message's home provider (e.g. `PATCH|DELETE /api/federation/dms/{dmId}/messages/{messageId}`; the `PATCH` body is `MessageUpdate`, `message-update-request.json`, §7.1), which applies the §7.1 author/tombstone rules as §7.4 *Edits & deletes* states them for a DM (a tombstone's `PATCH` is `404`, a repeated `DELETE` is `204` with no second `dm.message`) and emits the resulting `dm.message` update (§7.4). Only the original author may do so; there is no `moderate` in a DM. No sender copy.
 
 #### Confidentiality (Normative)
 
@@ -2557,7 +2565,7 @@ A provider **MAY** keep a per-user **notification feed**: a list of channel even
 
 * the `@` is not preceded by a letter, digit, `_`, or `@` (so `bob@example.com` in prose is not a mention);
 * `handle` is the longest following run of handle characters (`[a-z0-9_-]`, §2.2.1);
-* `@domain` is optional; a bare `@handle` names a user **of the provider hosting the channel**.
+* `@domain` is optional; a bare `@handle` names a user **of the provider hosting the channel**. In a DM, a bare `@handle` names a user of the message's holding provider, which is its recipient's home provider (§7.4, *Reading a whole conversation*), whichever provider serves the copy. An author who means anyone else **SHOULD** write `@handle@domain` or set `mentions` (§5.3). DMs create no feed entries (below), so in a DM this rule governs only how clients display and resolve mentions.
 
 **When entries are created.** When a message is **created** in a channel (not when it is edited, and never for DMs), the channel's provider creates an entry for each local user `u` who:
 
@@ -2732,7 +2740,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Carry the full canonical `Message` in `message.created`, `message.updated` and `dm.message` (§7.1, §7.4)
 - [ ] Support message edit (author-only; within `editUntil` when set, with no limit when absent) replacing any of `content`, `attachments`, `tags`, `mentions` and the article fields, and tombstone delete by the author or a holder of the group's `moderate` permission (§7.1)
 - [ ] Answer an edit of a tombstone `404` (`not_found`), and a repeated delete of one `204` with no second `message.deleted` fanned out (over WebSocket, a `message.deleted` with `correlationId` and no `cursor` to the requester alone), applying the §7.1 order of checks (§7.1)
-- [ ] Support channel reactions over `reaction.add`/`reaction.remove` and `PUT`/`DELETE …/reactions/{key}`, with the `…/reactions` listing, in the §7.1 order of checks: answer an add to a tombstone `404` (`not_found`); answer a remove on a tombstone, or one that removes nothing, `204`, and over WebSocket send that no-op's `reaction.removed` with `correlationId` to the requester alone, never fanned out (§7.1)
+- [ ] Support channel reactions over `reaction.add`/`reaction.remove` and `PUT`/`DELETE …/reactions/{key}`, with the `…/reactions` listing, in the §7.1 order of checks: answer an add to a tombstone `404` (`not_found`); answer a repeated add with the existing `Reaction`, changing nothing, and over WebSocket send its `reaction.added` with `correlationId` to the requester alone, never fanned out; answer a remove on a tombstone, or one that removes nothing, `204`, and over WebSocket send that no-op's `reaction.removed` with `correlationId` to the requester alone, never fanned out (§7.1)
 - [ ] Send the connection that issued a successful timeline or reaction command exactly one copy of the resulting event, with `correlationId`, whether or not it is subscribed to the channel (§7.1)
 - [ ] Accept `typing.start` only from an actor who can read the channel and holds a `post:<type>` grant there (`not_found` for a missing or unreadable channel, `forbidden` otherwise), send no acknowledgement of a successful one, and send nothing for a `typing.stop` with no active `start` (§7.1)
 - [ ] Serve channel history and replies holding messages only, tombstones included, never reactions (§7.2)
@@ -2751,7 +2759,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Publish provider signing key(s) in discovery and sign provider-to-provider requests (§8.1)
 - [ ] Accept direct-WS connections from remote members — resolve remote keys via §4.6, enforce prior membership + tier at subscribe-time — and advertise `capabilities.federation.realtimeDelivery` (§8.5)
 - [ ] Support the follow list (`GET`/`POST`/`DELETE /api/me/follows`) as pointers only — no server-side feed compilation or content replication (§7.6)
-- [ ] Support WebSocket resume (`since` replay with per-message cursors, each replayed event carrying the message's current state, a since-deleted message replaying as a `message.created` with the tombstone followed by its `message.deleted`), accept a channel's event cursors as its REST history `cursor` and its history cursors as `since`, and support the `ping`/`pong` heartbeat (§7.1, §7.2)
+- [ ] Support WebSocket resume (`since` replay with per-message cursors, each replayed event carrying the message's current state, a since-deleted message replaying as a `message.created` with the tombstone followed by its `message.deleted`), accept a channel's event cursors as its REST history and reply-listing `cursor` and those listings' cursors as `since`, and likewise for a DM conversation's `dm.message` cursors, history and reply listing on the provider that issued them, and support the `ping`/`pong` heartbeat (§7.1, §7.2)
 - [ ] Support real-time presence over WebSocket: `presence.subscribe`/`set`, `presence.update` fan-out, connection-derived online/offline, and §6.1 visibility filtering consistent with the REST presence endpoint (§7.5)
 - [ ] Support message fan-out + notification endpoints
 - [ ] Enforce tiers per channel and group, using the single effective-read-access rule (§11.3) on every surface, and end live subscriptions with `unsubscribed` (`reason: "access_revoked"`) when access is lost (§7.1)
@@ -2775,6 +2783,9 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Offer guest upgrade via `/api/me/claim` (subject to the registration mode, §4.1.1) and `/api/me/merge` (§4.8.1)
 - [ ] Offer a notification feed with mentions, per-scope notification settings, and Web Push (§10.1–§10.3)
 - [ ] Embed DM reactions inline in DM history (§7.4)
+- [ ] Support DM reactions with the §7.1 checks and no-op rules: `404` for a non-participant or an add to a tombstone, `204` with no `dm.reaction` for a remove on a tombstone or one that removes nothing, and the existing `Reaction` with no `dm.reaction` for a repeated add (§7.1, §7.4)
+- [ ] Support DM edits and deletes by the original author only (no `moderate`): `404` for a `PATCH` of a tombstone, `204` with no second `dm.message` for a repeated `DELETE` (§7.1, §7.4)
+- [ ] Support DM typing for any participant (no `post` grant), answering a non-participant `not_found`, sending no acknowledgement of a successful `typing.start` and nothing for a `typing.stop` with no active `start` (§7.4)
 - [ ] Support DM replies: check the parent only when `reference.provider` is absent or its own (`400` if it is not in the conversation), otherwise require (`400`) a participant's home provider; and serve the reply listing with its `provider` parameter, listing the replies it holds to (`provider`, `{messageId}`) (§7.4)
 - [ ] Keep read markers and unread counts by message id (§7.7)
 
@@ -2802,7 +2813,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Handle federation latency + retries
 - [ ] Name the DM recipient in `to`, record a conversation pointer at the home provider after a cross-provider send, and read sent history from the counterparty's provider (§7.4)
 - [ ] Not load remote content a message body names, or the attachments of an author on another provider than the message's, without a user action (§5.3)
-- [ ] Set `mentions` on messages that mention users (§5.3)
+- [ ] Set `mentions` on messages that mention users (§5.3), and in a DM write `@handle@domain` (or set `mentions`) for a user who is not on the recipient's home provider, since a bare `@handle` there names a user of that provider (§10.1)
 - [ ] Record a membership pointer at the home provider after joining a remote group, and remove it after leaving (§5.7)
 - [ ] Refresh an expired or failing attachment `url` by re-reading its message (§5.8)
 
