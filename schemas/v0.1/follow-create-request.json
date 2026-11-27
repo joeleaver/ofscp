@@ -12,6 +12,10 @@
       "minLength": 1,
       "description": "Reference to the channel to follow — a URI for remote channels (§2.4); MAY be a local id for same-provider channels."
     },
-    "groupId": { "type": "string", "minLength": 1 }
+    "groupId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Ignored: the provider derives the Follow's groupId from the channel (\u00a77.6)."
+    }
   }
 }
