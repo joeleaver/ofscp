@@ -244,6 +244,44 @@ async function main() {
     console.log(`OK: ${path.basename(samplePath)} is rejected by ${path.basename(schemaPath)}`);
   }
 
+  // §4.3.2: an unusable published key is ignored on its own. A keys response
+  // or discovery document carrying, beside a good key, a key that does not
+  // decode to 32 bytes and a key of an algorithm v0.1 does not define stays
+  // schema-valid, so tightening these schemas back fails the suite. Derived
+  // from the existing samples, so no extra sample file is needed.
+  const unusableKeys = [
+    {
+      key_id: 'dk_short',
+      algorithm: 'Ed25519',
+      // 33 bytes, base64: not a raw Ed25519 key.
+      public_key: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8g',
+      created_at: '2026-01-11T09:30:00Z'
+    },
+    {
+      key_id: 'dk_future',
+      algorithm: 'Ed448',
+      public_key: 'not-an-ed25519-key',
+      created_at: '2026-01-11T09:30:00Z'
+    }
+  ];
+  const perKeyCases = [
+    ['tests/user-keys-response.sample.json', 'schemas/v0.1/user-keys-response.json', (doc) => doc.keys],
+    ['tests/provider-discovery.sample.json', 'schemas/v0.1/provider-discovery.json', (doc) => doc.provider.publicKeys]
+  ];
+  for (const [samplePath, schemaPath, keysOf] of perKeyCases) {
+    const schema = await loadJson(schemaPath);
+    const validate = ajv.getSchema(schema.$id) ?? (await ajv.compileAsync(schema));
+    const doc = await loadJson(samplePath);
+    keysOf(doc).push(...structuredClone(unusableKeys));
+    if (!validate(doc)) {
+      console.error(`Validation failed: ${samplePath} with unusable keys added against ${schemaPath}`);
+      console.error(validate.errors);
+      process.exitCode = 1;
+      continue;
+    }
+    console.log(`OK: ${path.basename(samplePath)} with unusable keys added validates against ${path.basename(schemaPath)}`);
+  }
+
   // The request-signing vector (§4.4.3) signs a POST that creates a channel
   // message (§7.1); its body must be a valid message-create request.
   const vector = await loadJson('tests/signing-vector.json');
