@@ -68,6 +68,7 @@ async function main() {
     ['tests/channel.sample.json', 'schemas/v0.1/channel.json'],
     ['tests/channel-list.sample.json', 'schemas/v0.1/channel-list.json'],
     ['tests/reaction-put-request.sample.json', 'schemas/v0.1/reaction-put-request.json'],
+    ['tests/reaction-put-request.empty.sample.json', 'schemas/v0.1/reaction-put-request.json'],
     ['tests/group-create-request.sample.json', 'schemas/v0.1/group-create-request.json'],
     ['tests/group-update-request.sample.json', 'schemas/v0.1/group-update-request.json'],
     ['tests/channel-create-request.sample.json', 'schemas/v0.1/channel-create-request.json'],
