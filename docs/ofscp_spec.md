@@ -1049,7 +1049,7 @@ Removes the caller's own membership. **Response:** `204 No Content`. The `owner`
 
 #### GET /api/groups/{groupId}/members
 
-Lists members. **Authorization:** visible to group members; for `public`/`discoverable` groups providers **MAY** expose it publicly. Members who have hidden their membership (§6) **MAY** be omitted for unauthorized viewers. Paginated per §7.2. **Errors:** `404` (no such group); `403` when a signed caller may not see the list (a non-member, unless the provider exposes the list publicly); `401` for a signed request that fails §4.5. This route is not among the anonymous-reader routes of §4.5: an unsigned request gets `401` (§4.5 step 1), even where the provider exposes the list to non-members who sign.
+Lists members. **Authorization:** visible to group members; for `public`/`discoverable` groups providers **MAY** expose it to non-members. Members who have hidden their membership (§6) **MAY** be omitted for unauthorized viewers. Paginated per §7.2. **Errors:** `404` (no such group); `403` when a signed caller may not see the list (a non-member, unless the provider exposes the list to non-members); `401` for a signed request that fails §4.5. This route is not among the anonymous-reader routes of §4.5: an unsigned request gets `401` (§4.5 step 1).
 
 **Response (`200 OK`):**
 ```json
