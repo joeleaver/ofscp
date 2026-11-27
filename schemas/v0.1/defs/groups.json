@@ -143,7 +143,7 @@
         },
         "role": {
           "$ref": "#/$defs/Role",
-          "description": "Role granted on redemption (default `member`; a guest provisioned from the invite gets the guest role, §4.8). Must be a canonical role other than `owner` or one in the group's `roles` catalogue, and bound by the subset rule against the invite's creator (§5.6, §5.7). Redeeming never changes an existing member's role."
+          "description": "Role granted to a full account redeeming through /redeem (default `member`). It does not apply to a guest provisioned through /guest, who always gets the `guest` role (§4.8, §5.6). Must be a canonical role other than `owner` or one in the group's `roles` catalogue, and bound by the subset rule against the invite's creator (§5.6, §5.7). Redeeming never changes an existing member's role."
         },
         "grantsGuest": {
           "type": "boolean",

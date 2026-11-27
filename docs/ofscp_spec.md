@@ -504,7 +504,7 @@ A guest account:
 
 * Is created on the **group's** provider and bound to the group it joined; it **MAY** carry an `expiresAt` after which the provider **SHOULD** revoke it.
 * Authenticates exactly like a normal account: the guest registers an Ed25519 **device key** during provisioning (§5.6), and all subsequent requests are signed (§4.4). There is **no password**; the device key is the only credential.
-* Is represented by a `UserProfile` with `"guest": true` (and optional `expiresAt`). Its role within the group defaults to `guest`; whether guests may post is governed by the group's permission map (§5.2).
+* Is represented by a `UserProfile` with `"guest": true` (and optional `expiresAt`). Its role within the group is always `guest`, whatever the invite's `role` (§5.6); whether guests may post is governed by the group's permission map (§5.2).
 * Is **not federated.** A guest actor **MUST NOT** be used for cross-provider requests, and remote providers **MAY** refuse to resolve or accept guest actors. The provider **MAY** still serve the guest's public key at the keys endpoint (§4.6) so that local verification works.
 
 Providers **MAY** decline to support guest accounts; an invite with `grantsGuest: false` (or a provider that does not offer guests) requires a full account to redeem.
@@ -980,11 +980,11 @@ Creates an invite. **Authorization:** group `manage` role.
 { "channelId": "chn_general", "role": "member", "grantsGuest": true, "maxUses": 25, "expiresAt": "2025-03-08T12:00:00Z" }
 ```
 
-All fields are optional. An absent `role` grants `member` through `/redeem`; a guest account provisioned from the invite (`/guest`) gets role `guest` by default (§4.8). The provider **MUST** check the fields it is given:
+All fields are optional. The invite's `role` applies only to full accounts redeeming through `/redeem`, and an absent `role` grants `member` there. A guest account provisioned from the invite (`/guest`) **always** joins with role `guest`, whatever the invite's `role` (§4.8). The provider **MUST** check the fields it is given:
 
 * `role`, when present, **MUST** be a canonical role or one present in the group's `roles` catalogue (§5.2), as for a member's role change (§5.7), and **MUST NOT** be `owner`: ownership passes only by transfer (§5.7). Otherwise **`400`**.
 * `channelId`, when present, **MUST** name a channel of the group. Otherwise **`400`**.
-* The **subset rule** (§5.7) binds the role the invite grants (its `role`, or `member` when absent): the creator **MUST** hold every permission that role holds, otherwise the provider **MUST** reject with **`403`**. An invite cannot hand out more power than its creator has.
+* The **subset rule** (§5.7) binds the role the invite grants through `/redeem` (its `role`, or `member` when absent): the creator **MUST** hold every permission that role holds, otherwise the provider **MUST** reject with **`403`**. An invite cannot hand out more power than its creator has.
 * A provider that does not support guest accounts (§4.8) **MAY** reject `grantsGuest: true` with **`400`**. If it creates such an invite instead, the invite still works through `/redeem` for full accounts, and only `/guest` is refused (`403`, below).
 
 **Response (`201 Created`):** the created `Invite` (including `token`). **Errors:** `400`, `403`. The shareable join link is provider-defined but **SHOULD** embed the token, e.g. `https://{provider}/invite/{token}`.
@@ -999,14 +999,16 @@ Revokes an invite. **Authorization:** group `manage` role. **Response:** `204 No
 
 #### POST /api/invites/{token}/redeem
 
-Redeems an invite as an **existing account** (signed request, §4.4). The caller joins the group (or `channelId`) with the invite's `role`.
+Redeems an invite as an **existing account** (signed request, §4.4). The caller joins the group (or `channelId`) with the invite's `role` (`member` when absent).
+
+The provider **MUST** check the invite first, whoever the caller is: an unknown or expired token answers **`404`** and an exhausted one (`maxUses` reached) **`409`**, even when the caller is already a member. Only for a valid invite does it then check the caller's membership.
 
 **Response (`200 OK`):**
 ```json
 { "groupId": "grp_1", "channelId": "chn_general", "role": "member" }
 ```
 
-If the caller is already a member of the group, the owner included, the provider **MUST** answer **`200 OK`** with this body carrying the caller's **current** `role`, and **MUST NOT** change the role or consume a use of the invite (`uses` is unchanged). The invite's `role` never changes an existing member's role: that goes through `PATCH /api/groups/{groupId}/members/{userRef}` and its subset rule (§5.7).
+If the invite is valid and the caller is already a member of the group, the owner included, the provider **MUST** answer **`200 OK`** with this body carrying the invite's `channelId` (when it has one) and the caller's **current** `role`, and **MUST NOT** change the role or consume a use of the invite (`uses` is unchanged). The invite's `role` never changes an existing member's role: that goes through `PATCH /api/groups/{groupId}/members/{userRef}` and its subset rule (§5.7).
 
 **Errors:** `404` (unknown/expired token), `409` (`maxUses` exhausted), `403` (provider/group policy forbids).
 
@@ -1030,7 +1032,7 @@ Redeems an invite by provisioning a **guest account** (§4.8). Requires the invi
 }
 ```
 
-The provider binds the device key to the new guest actor; all subsequent requests are signed (§4.4). **Errors:** `404`, `409`, `403` (e.g. `grantsGuest` is false or guests unsupported).
+The guest joins with role `guest`, whatever the invite's `role` (§4.8). The provider binds the device key to the new guest actor; all subsequent requests are signed (§4.4). **Errors:** `404`, `409`, `403` (e.g. `grantsGuest` is false or guests unsupported).
 
 ### 5.7. Membership
 
@@ -1083,7 +1085,7 @@ Sets or clears a member's `displayNameOverride`. **Request:** `{ "displayNameOve
 
 #### `member.updated` event
 
-Whenever a member's `displayNameOverride` or `role` changes, the provider emits `member.updated` with `{ "groupId", "member": Member }` to every live subscription on the group's channels and to the affected member's own connections, so clients can update member lists and author names without re-fetching. An ownership transfer changes two roles, so it emits `member.updated` for **both** members. Nothing else emits it: there is no `member.joined` or `member.left` event, and joins, leaves and kicks emit no event on the group's channels. A membership the provider hosts that is created or ends does change that user's group list, so the provider emits `groups.updated` to the user's own connections when it is also their home provider (*My groups*, below):
+Whenever a member's `displayNameOverride` or `role` changes, the provider emits `member.updated` with `{ "groupId", "member": Member }` to every live subscription on the group's channels and to the affected member's own connections, so clients can update member lists and author names without re-fetching. An ownership transfer changes two roles, so it emits `member.updated` for **both** members. Nothing else emits it: there is no `member.joined` or `member.left` event, and joins, leaves and kicks emit no event on the group's channels. (A leave or kick still ends the user's live subscriptions to the group's channels with an `unsubscribed`, *Losing access* in §7.1, and changes their group list, `groups.updated` below.) A membership the provider hosts that is created or ends does change that user's group list, so the provider emits `groups.updated` to the user's own connections when it is also their home provider (*My groups*, below):
 
 ```json
 { "id": "evt_700", "type": "member.updated", "ts": "2026-02-01T10:00:00Z", "data": { "groupId": "grp_1", "member": { "user": "ada@a.com", "role": "member", "joinedAt": "2026-01-01T12:00:00Z", "displayNameOverride": "Ada (mod)" } } }
@@ -1125,7 +1127,7 @@ Endpoints (signed local-account endpoints; remote actors receive `403`):
 
 Clients:
 
-* After joining a remote group (a `201` or `200` `Member` from §5.7 `join`, §5.6 `redeem` or §8.2), the client **SHOULD** `PUT` its pointer at its home provider. A join that is still pending (`202`) is recorded once it is approved, which the client learns by reading the group.
+* After joining a remote group (a `201` or `200` from §5.7 `join`, §5.6 `redeem` or §8.2), the client **SHOULD** `PUT` its pointer at its home provider. A join that is still pending (`202`) is recorded once it is approved, which the client learns by reading the group.
 * After leaving a remote group, or on learning it was removed from one (the group's provider answers `403` or `404` to `GET /api/groups/{groupId}`, or no longer lists the user among the group's members, §5.7), the client **SHOULD** `DELETE` the pointer. A `404` from one channel, or an `unsubscribed` with `access_revoked`, is **not** such a signal: it can mean only that the user lost access to that channel (§11.3, §7.1). It **MAY** update the `role` hint when it sees the role change (for example in `member.updated`).
 
 **`groups.updated` event.** Whenever the caller's group list changes — a pointer is recorded, changed or removed by any of their devices, or a membership the provider hosts is created, changes role, or ends (leave, removal, or the group is deleted) — the provider emits `groups.updated` to **all** of the user's connections, with no subscription needed (as for `dm.conversation`, §7.4):
@@ -2690,7 +2692,8 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Answer a repeat `join` under the `request` policy with `202` and the caller's existing pending `JoinRequest`, unchanged; answer `leave` from a non-member with `404` (and from the owner with `409`) (§5.7)
 - [ ] Gate join-request approve and deny on `manage` or `moderate`, without the subset rule; give an approved requester role `member`, and answer an approval for someone already a member with `200` and the existing `Member`, marking the request `approved` (§5.7)
 - [ ] On invite creation, reject a `role` that is `owner` or neither canonical nor in the group's `roles`, and a `channelId` that is not a channel of the group, with `400`, and an invite whose role holds a permission the creator lacks with `403` (§5.6)
-- [ ] Answer `redeem` by a caller who is already a member (the owner included) with `200` and their current role, changing no role and consuming no use of the invite (§5.6)
+- [ ] On `redeem`, check the invite first (`404` unknown or expired, `409` exhausted, whoever the caller is); answer a valid invite redeemed by a caller who is already a member (the owner included) with `200`, the invite's `channelId` and their current role, changing no role and consuming no use of the invite (§5.6)
+- [ ] Give a guest provisioned through `/invites/{token}/guest` role `guest`, whatever the invite's `role` (§4.8, §5.6)
 - [ ] Support message creation of every type (`message`, `memo`, `article`) with `attachments`, `reference`, `tags` and `metadata`, over both `message.create` and `POST …/messages`, gated by `post:<type>` and by `replyOnly` / `replyOnlyTo` (which only a valid reply, `reference.type` `"reply"` naming an existing message in the channel, satisfies), answering `404` for a channel the actor cannot read (§5.2.1, §7.1)
 - [ ] Treat a `reference.provider` as a canonical authority (§2.2), and one equal to its own authority as absent; reject (`400`) a channel reply whose `provider` is not the channel's own provider (§7.1, §7.2)
 - [ ] Serve a `Reaction` whose `reference.provider`, if present, is its own authority, since a reaction is stored with its message (§7.1)
