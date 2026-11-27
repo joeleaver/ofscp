@@ -8,6 +8,7 @@
     },
     {
       "channel": "chn_general",
+      "groupId": "grp_1",
       "createdAt": "2026-02-02T11:30:00Z",
       "metadata": []
     }
