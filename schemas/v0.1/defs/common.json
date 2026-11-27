@@ -35,6 +35,12 @@
       "pattern": "^[A-Za-z0-9_-]{1,128}$",
       "description": "A provider-assigned local id (§2.2): opaque, unique within the issuing provider, path-safe."
     },
+    "ProviderAuthority": {
+      "type": "string",
+      "pattern": "^[a-z0-9.-]+(:[0-9]{1,5})?$",
+      "description": "A provider's canonical authority (§2.2): the host, lowercased, with :port only if non-default, no trailing dot, and internationalized names in their ASCII (xn--) form. The same form as the domain of an actor (UserRef); the pattern is looser than the rule, and the prose governs.",
+      "examples": ["b.com"]
+    },
     "Handle": {
       "type": "string",
       "pattern": "^[a-z0-9_-]{3,32}$",
