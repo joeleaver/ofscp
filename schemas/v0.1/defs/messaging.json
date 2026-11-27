@@ -213,8 +213,8 @@
       }
     },
     "TimelineItem": {
-      "description": "Union of message-like objects present in timelines.",
-      "oneOf": [{ "$ref": "#/$defs/BaseMessage" }, { "$ref": "#/$defs/Reaction" }]
+      "description": "An item of channel history or of a reply listing (§7.2): a message only (type message, memo or article), tombstones included. Reactions are never timeline items; they come only from the …/reactions listing and reaction events (§7.1).",
+      "$ref": "#/$defs/BaseMessage"
     },
     "PagedResponse": {
       "type": "object",
