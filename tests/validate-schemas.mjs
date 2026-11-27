@@ -334,6 +334,39 @@ async function main() {
     }
   }
 
+  // §5.6: an invite token is a bearer secret. The creation response MUST
+  // carry it; any other Invite may omit it. Built from tests/invite.sample.json,
+  // so no extra sample file is needed.
+  {
+    const inviteSchema = await loadJson('schemas/v0.1/invite.json');
+    const validateInvite = ajv.getSchema(inviteSchema.$id) ?? (await ajv.compileAsync(inviteSchema));
+    const createSchema = await loadJson('schemas/v0.1/invite-create-response.json');
+    const validateCreated = ajv.getSchema(createSchema.$id) ?? (await ajv.compileAsync(createSchema));
+    const invite = await loadJson('tests/invite.sample.json');
+    const { token: _token, ...tokenless } = invite;
+
+    if (!validateCreated(invite)) {
+      console.error('Validation failed: invite.sample.json against invite-create-response.json');
+      console.error(validateCreated.errors);
+      process.exitCode = 1;
+    } else {
+      console.log('OK: invite.sample.json validates against invite-create-response.json');
+    }
+    if (!validateInvite(tokenless)) {
+      console.error('Validation failed: invite.sample.json without token against invite.json');
+      console.error(validateInvite.errors);
+      process.exitCode = 1;
+    } else {
+      console.log('OK: invite.sample.json without token validates against invite.json');
+    }
+    if (validateCreated(tokenless)) {
+      console.error('Expected rejection: invite.sample.json without token unexpectedly validates against invite-create-response.json');
+      process.exitCode = 1;
+    } else {
+      console.log('OK: invite.sample.json without token is rejected by invite-create-response.json');
+    }
+  }
+
   // The request-signing vector (§4.4.3) signs a POST that creates a channel
   // message (§7.1); its body must be a valid message-create request.
   const vector = await loadJson('tests/signing-vector.json');

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ofscp/schemas/v0.1/invite-create-response.json",
+  "title": "OFSCP POST /api/groups/{groupId}/invites response (v0.1)",
+  "description": "The created Invite. Unlike everywhere else an Invite appears, it MUST carry the bearer `token` (§5.6).",
+  "allOf": [
+    { "$ref": "./defs/groups.json#/$defs/Invite" },
+    { "type": "object", "required": ["token"] }
+  ]
+}
