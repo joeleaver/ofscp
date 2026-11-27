@@ -15,7 +15,7 @@
     "groupId": {
       "type": "string",
       "minLength": 1,
-      "description": "Optional reference to the channel's group, for client convenience."
+      "description": "Optional; providers SHOULD include it. Ref (§2.2) to the channel's group, derived by the provider from the channel (§7.6): its local id when the channel is on the provider serving the follow, otherwise the group's object URI https://{domain}/api/groups/{groupId} on the channel's authority."
     },
     "createdAt": { "$ref": "./defs/common.json#/$defs/Rfc3339DateTime" },
     "metadata": { "$ref": "./defs/objects.json#/$defs/MetadataList" }

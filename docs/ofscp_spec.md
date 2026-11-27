@@ -2313,8 +2313,8 @@ A follow is a **pointer**, not a copy. The provider stores only *which* channels
 
 #### Managing the follow list
 
-* `GET /api/me/follows` — returns `{ "follows": [ Follow ], "metadata": [] }`, where each `Follow` is `{ channel, groupId?, createdAt, metadata }` and `channel` is a channel reference (a URI for remote channels, §2.4).
-* `POST /api/me/follows` — body `{ "channel": "<ref>", "groupId"?: "<ref>" }`; starts following. The provider **SHOULD** verify the user currently has access to the channel and reject with **`404`** otherwise, as for a channel that does not exist (§11.3). **`201 Created`** returns the `Follow`. Idempotent: following an already-followed channel returns the existing entry.
+* `GET /api/me/follows` — returns `{ "follows": [ Follow ], "metadata": [] }`, where each `Follow` is `{ channel, groupId?, createdAt, metadata }` and `channel` is a channel reference (a URI for remote channels, §2.4). `groupId` is optional, and a provider **SHOULD** include it whenever it can derive it. When present, it is a ref (§2.2) to the channel's group: its local id when the channel is on the provider serving the follow, otherwise the group's object URI `https://{domain}/api/groups/{groupId}` on the channel's authority. The provider **MUST** derive it from the channel.
+* `POST /api/me/follows` — body `{ "channel": "<ref>", "groupId"?: "<ref>" }`; starts following. The provider **MUST** ignore a `groupId` in the body (it derives the `Follow`'s `groupId` from the channel, above). The provider **SHOULD** verify the user currently has access to the channel and reject with **`404`** otherwise, as for a channel that does not exist (§11.3). **`201 Created`** returns the `Follow`. Idempotent: following an already-followed channel returns the existing entry.
 * `DELETE /api/me/follows/{channelRef}` — stops following. **`204 No Content`**.
 
 #### Composing the feed (client-side)
@@ -2335,7 +2335,7 @@ A provider **MAY** keep, for each of its own users, a **read marker** per *scope
 
 A marker names a **message**, never a cursor: clients **MUST NOT** decode cursors (§2.5), and every client already holds message ids. A local id is meaningful only on the provider that issued it (§2.2), so for a DM scope the client names a message it read **from this provider** (§7.4, *Reading a whole conversation*), never one it read from the counterparty's provider.
 
-* `GET /api/me/read-markers` — `{ "scopes": [ { "scopeId", "lastReadMessageId"?, "unreadCount", "groupId"? } ] }`: one entry for every channel the user can currently read (§11.3) in groups they belong to, and every DM conversation in their conversation list (§7.4: inbox or pointer). `lastReadMessageId` is absent if nothing has been read; `groupId` is present for channel scopes. `unreadCount` counts messages in the scope **newer than the marker** and **not authored by the user**.
+* `GET /api/me/read-markers` — `{ "scopes": [ { "scopeId", "lastReadMessageId"?, "unreadCount", "groupId"? } ] }`: one entry for every channel the user can currently read (§11.3) in groups they belong to, and every DM conversation in their conversation list (§7.4: inbox or pointer). `lastReadMessageId` is absent if nothing has been read; `groupId` is present for channel scopes. `unreadCount` counts messages in the scope **newer than the marker** and **not authored by the user**. Tombstones count, since a tombstone keeps its `id` and timeline position (§7.1), so the count drops only when the provider reaps one; `unreadCount` **MUST** be exact, never capped or approximated.
 * `PATCH /api/me/read-markers` — `{ "markers": [ { "scopeId", "lastReadMessageId" } ] }` (at least one). Markers only move **forward** in the scope's timeline order; a marker that would move backward is ignored, as is one naming a message the provider does not hold in that scope, or an unknown scope. **`200 OK`** returns `{ "scopes": [ … ] }` containing only the scopes that actually advanced, with their new `unreadCount`.
 * When markers advance, the provider emits `read.updated` with `{ "markers": [ … ] }` (the same entries as the PATCH response) to all of the user's connections, so their other devices clear the same unread badges.
 
@@ -2771,7 +2771,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Support the explicit contacts model (request/accept/remove, local and federated) backing the `contacts` visibility tier (§6.7)
 - [ ] Publish provider signing key(s) in discovery and sign provider-to-provider requests (§8.1)
 - [ ] Accept direct-WS connections from remote members — resolve remote keys via §4.6, enforce prior membership + tier at subscribe-time — and advertise `capabilities.federation.realtimeDelivery` (§8.5)
-- [ ] Support the follow list (`GET`/`POST`/`DELETE /api/me/follows`) as pointers only — no server-side feed compilation or content replication (§7.6)
+- [ ] Support the follow list (`GET`/`POST`/`DELETE /api/me/follows`) as pointers only — no server-side feed compilation or content replication — with each `groupId` derived from the channel as a ref, never taken from the request (§7.6)
 - [ ] Support WebSocket resume (`since` replay with per-message cursors, each replayed event carrying the message's current state, a since-deleted message replaying as a `message.created` with the tombstone followed by its `message.deleted`), accept a channel's event cursors as its REST history and reply-listing `cursor` and those listings' cursors as `since`, and likewise for a DM conversation's `dm.message` cursors, history and reply listing on the provider that issued them, and support the `ping`/`pong` heartbeat (§7.1, §7.2)
 - [ ] Support real-time presence over WebSocket: `presence.subscribe`/`set`, `presence.update` fan-out, connection-derived online/offline, and §6.1 visibility filtering consistent with the REST presence endpoint (§7.5)
 - [ ] Support message fan-out + notification endpoints
@@ -2800,7 +2800,7 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Support DM edits and deletes by the original author only (no `moderate`): `404` for a `PATCH` of a tombstone, `204` with no second `dm.message` for a repeated `DELETE` (§7.1, §7.4)
 - [ ] Support DM typing for any participant (no `post` grant), answering a non-participant `not_found`, sending no acknowledgement of a successful `typing.start` and nothing for a `typing.stop` with no active `start` (§7.4)
 - [ ] Support DM replies: check the parent only when `reference.provider` is absent or its own (`400` if it is not in the conversation), otherwise require (`400`) a participant's home provider; and serve the reply listing with its `provider` parameter, listing the replies it holds to (`provider`, `{messageId}`) (§7.4)
-- [ ] Keep read markers and unread counts by message id (§7.7)
+- [ ] Keep read markers and unread counts by message id, with `unreadCount` exact and counting tombstones (§7.7)
 
 ### Client **MUST**
 
