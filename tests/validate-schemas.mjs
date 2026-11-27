@@ -317,6 +317,23 @@ async function main() {
     }
   }
 
+  // §7.2: channel history and replies hold messages only. A page carrying a
+  // Reaction (built from tests/reaction.sample.json) beside its message MUST
+  // be rejected, so widening TimelineItem back to a union fails the suite.
+  {
+    const schemaPath = 'schemas/v0.1/messages-page.json';
+    const schema = await loadJson(schemaPath);
+    const validate = ajv.getSchema(schema.$id) ?? (await ajv.compileAsync(schema));
+    const page = await loadJson('tests/messages-page.sample.json');
+    page.items.push(await loadJson('tests/reaction.sample.json'));
+    if (validate(page)) {
+      console.error(`Expected rejection: messages-page.sample.json with a Reaction item unexpectedly validates against ${schemaPath}`);
+      process.exitCode = 1;
+    } else {
+      console.log('OK: messages-page.sample.json with a Reaction item is rejected by messages-page.json');
+    }
+  }
+
   // The request-signing vector (§4.4.3) signs a POST that creates a channel
   // message (§7.1); its body must be a valid message-create request.
   const vector = await loadJson('tests/signing-vector.json');
