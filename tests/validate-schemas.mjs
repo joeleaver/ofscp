@@ -282,6 +282,41 @@ async function main() {
     console.log(`OK: ${path.basename(samplePath)} with unusable keys added validates against ${path.basename(schemaPath)}`);
   }
 
+  // §7.2 / §7.4: a reply's parent is (provider, id). A reference carrying a
+  // canonical `provider` authority validates; a provider spelled as a URL, with
+  // uppercase letters, or empty is rejected. Derived from the existing samples,
+  // so no extra sample file is needed.
+  const referenceCases = [
+    ['tests/dm-message-create-request.sample.json', 'schemas/v0.1/dm-message-create-request.json'],
+    ['tests/message-create-request.sample.json', 'schemas/v0.1/message-create-request.json']
+  ];
+  const goodProviders = ['a.com', 'chat.example.org:8443', 'xn--bcher-kva.example'];
+  const badProviders = ['https://a.com', 'A.com', 'a.com/', '', 'a.com:'];
+  for (const [samplePath, schemaPath] of referenceCases) {
+    const schema = await loadJson(schemaPath);
+    const validate = ajv.getSchema(schema.$id) ?? (await ajv.compileAsync(schema));
+    const base = await loadJson(samplePath);
+    for (const provider of goodProviders) {
+      const doc = { ...structuredClone(base), reference: { type: 'reply', id: 'msg_1', provider } };
+      if (!validate(doc)) {
+        console.error(`Validation failed: ${samplePath} with reference.provider ${JSON.stringify(provider)} against ${schemaPath}`);
+        console.error(validate.errors);
+        process.exitCode = 1;
+        continue;
+      }
+      console.log(`OK: ${path.basename(samplePath)} with reference.provider ${JSON.stringify(provider)} validates against ${path.basename(schemaPath)}`);
+    }
+    for (const provider of badProviders) {
+      const doc = { ...structuredClone(base), reference: { type: 'reply', id: 'msg_1', provider } };
+      if (validate(doc)) {
+        console.error(`Expected rejection: ${samplePath} with reference.provider ${JSON.stringify(provider)} unexpectedly validates against ${schemaPath}`);
+        process.exitCode = 1;
+        continue;
+      }
+      console.log(`OK: ${path.basename(samplePath)} with reference.provider ${JSON.stringify(provider)} is rejected by ${path.basename(schemaPath)}`);
+    }
+  }
+
   // The request-signing vector (§4.4.3) signs a POST that creates a channel
   // message (§7.1); its body must be a valid message-create request.
   const vector = await loadJson('tests/signing-vector.json');
