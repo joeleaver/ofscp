@@ -934,6 +934,8 @@ Lists the channels of a group that are **visible to the caller**, per the effect
 { "items": [ { "id": "chn_general", "groupId": "grp_1", "type": "text", "tier": "public", "createdAt": "2025-03-01T12:00:00Z", "updatedAt": "2025-03-01T12:00:00Z", "metadata": [] } ] }
 ```
 
+The list is not paginated: the response has no `page` object. Schema: `channel-list.json`.
+
 #### POST /api/groups/{groupId}/channels
 
 Creates a channel in the group.
@@ -1873,6 +1875,8 @@ The provider creates the `Reaction` (assigning `id`, `author`, `createdAt`) and 
 
 * `PUT /api/groups/{groupId}/channels/{channelId}/messages/{messageId}/reactions/{key}` — add your reaction (optional body `{ "unicode": "…", "image": "…" }`); idempotent.
 * `DELETE /api/groups/{groupId}/channels/{channelId}/messages/{messageId}/reactions/{key}` — remove your reaction. `204 No Content`.
+
+The `PUT` body is optional and may be empty (`reaction-put-request.json`). `unicode` and `image` (an `https` URL) are each optional, and neither is tied to the other or to `key`, as in `reaction.add`: `key` alone identifies the reaction. A body that does not match the schema is `400` (`bad_request`). The same body applies to the DM route (§7.4).
 
 #### Typing indicators
 
