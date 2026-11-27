@@ -26,6 +26,9 @@
       "items": { "$ref": "./defs/identity.json#/$defs/UserRef" },
       "description": "Actors the message mentions (§5.3). When present it is authoritative for mention notifications (§10.1)."
     },
-    "reference": { "$ref": "./defs/messaging.json#/$defs/MessageReference" }
+    "reference": {
+      "$ref": "./defs/messaging.json#/$defs/MessageReference",
+      "description": "A reply's parent (§7.4 Replies). Absent provider means the parent is held by this (the recipient's) provider, which checks that it resolves to a message in the same conversation; a provider naming another provider MUST be the home provider of one of the conversation's participants (400 otherwise), and the parent is not checked."
+    }
   }
 }

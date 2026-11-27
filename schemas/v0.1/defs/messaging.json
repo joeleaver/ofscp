@@ -15,12 +15,20 @@
       }
     },
     "MessageReference": {
+      "description": "A link to another message (§5.3): a reply's parent (§7.2), or a reaction's target. The referenced message is identified by (provider, id).",
       "type": "object",
       "additionalProperties": true,
       "required": ["type", "id"],
       "properties": {
         "type": { "type": "string", "minLength": 1 },
-        "id": { "$ref": "./common.json#/$defs/LocalId" }
+        "id": {
+          "$ref": "./common.json#/$defs/LocalId",
+          "description": "The referenced message's local id, issued by the provider that holds it (§2.2)."
+        },
+        "provider": {
+          "$ref": "./common.json#/$defs/ProviderAuthority",
+          "description": "Canonical authority (§2.2) of the provider holding the referenced message. Absent means the provider holding the message that carries this reference; a value equal to that provider's own authority MUST be treated exactly like absent. Only a DM reply can name another provider: in a channel it MUST name the channel's provider (§7.2), and in a DM another provider MUST be the home provider of one of the conversation's participants (§7.4); otherwise 400."
+        }
       }
     },
     "Permissions": {
@@ -58,7 +66,7 @@
             { "$ref": "#/$defs/MessageReference" },
             { "properties": { "type": { "const": "reply" } } }
           ],
-          "description": "A reply's parent (§7.2): type MUST be reply (anything else is 400), and id MUST name a message in the same channel. Only such a valid reply satisfies replyOnly / replyOnlyTo (§5.2.1)."
+          "description": "A reply's parent (§7.2): type MUST be reply (anything else is 400), id MUST name a message in the same channel, and provider, if present, MUST be the channel's own provider (anything else is 400). Only such a valid reply satisfies replyOnly / replyOnlyTo (§5.2.1)."
         },
         "tags": {
           "type": "array",
