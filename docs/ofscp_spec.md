@@ -980,7 +980,14 @@ Creates an invite. **Authorization:** group `manage` role.
 { "channelId": "chn_general", "role": "member", "grantsGuest": true, "maxUses": 25, "expiresAt": "2025-03-08T12:00:00Z" }
 ```
 
-All fields are optional. **Response (`201 Created`):** the created `Invite` (including `token`). The shareable join link is provider-defined but **SHOULD** embed the token, e.g. `https://{provider}/invite/{token}`.
+All fields are optional. An absent `role` grants `member` through `/redeem`; a guest account provisioned from the invite (`/guest`) gets role `guest` by default (§4.8). The provider **MUST** check the fields it is given:
+
+* `role`, when present, **MUST** be a canonical role or one present in the group's `roles` catalogue (§5.2), as for a member's role change (§5.7), and **MUST NOT** be `owner`: ownership passes only by transfer (§5.7). Otherwise **`400`**.
+* `channelId`, when present, **MUST** name a channel of the group. Otherwise **`400`**.
+* The **subset rule** (§5.7) binds the role the invite grants (its `role`, or `member` when absent): the creator **MUST** hold every permission that role holds, otherwise the provider **MUST** reject with **`403`**. An invite cannot hand out more power than its creator has.
+* A provider that does not support guest accounts (§4.8) **MAY** reject `grantsGuest: true` with **`400`**. If it creates such an invite instead, the invite still works through `/redeem` for full accounts, and only `/guest` is refused (`403`, below).
+
+**Response (`201 Created`):** the created `Invite` (including `token`). **Errors:** `400`, `403`. The shareable join link is provider-defined but **SHOULD** embed the token, e.g. `https://{provider}/invite/{token}`.
 
 #### GET /api/groups/{groupId}/invites
 
@@ -998,6 +1005,8 @@ Redeems an invite as an **existing account** (signed request, §4.4). The caller
 ```json
 { "groupId": "grp_1", "channelId": "chn_general", "role": "member" }
 ```
+
+If the caller is already a member of the group, the owner included, the provider **MUST** answer **`200 OK`** with this body carrying the caller's **current** `role`, and **MUST NOT** change the role or consume a use of the invite (`uses` is unchanged). The invite's `role` never changes an existing member's role: that goes through `PATCH /api/groups/{groupId}/members/{userRef}` and its subset rule (§5.7).
 
 **Errors:** `404` (unknown/expired token), `409` (`maxUses` exhausted), `403` (provider/group policy forbids).
 
@@ -1029,14 +1038,14 @@ A **member** is `{ user, role, joinedAt }`. Roles default to `member`; canonical
 
 A member **MAY** also carry an optional `displayNameOverride`: a group-scoped display name that overrides the user's global `UserProfile.displayName` (§5.1.1) within that one group, absent = use the global name. It is stored by the group's home provider and returned in member lists. It is set with `PATCH /api/groups/{groupId}/members/{userRef}/display-name` (below).
 
-Several membership mutations are constrained by a **subset (self-protect) rule**: an actor **MUST NOT** perform a mutation that touches a member holding a permission the actor does not itself hold, nor grant a role holding such a permission. Concretely, with `perms(role)` the role's permission set: a caller `C` may act on a target role `T` only when `perms(T) ⊆ perms(C)`. The `owner` holds every permission, so the owner may act on anyone; and because the owner's set is a superset of all others, no non-owner may act on the owner through these rules.
+Several membership mutations are constrained by a **subset (self-protect) rule**: an actor **MUST NOT** perform a mutation that touches a member holding a permission the actor does not itself hold, nor grant a role holding such a permission. Concretely, with `perms(role)` the role's permission set: a caller `C` may act on a target role `T` only when `perms(T) ⊆ perms(C)`. The `owner` holds every permission, so the owner may act on anyone; and because the owner's set is a superset of all others, no non-owner may act on the owner through these rules. The rule applies exactly where an endpoint says so: a role change, a kick, setting another member's nickname (below) and creating an invite (§5.6). It does **not** apply to approving or denying a join request (*Join requests*, below).
 
 #### POST /api/groups/{groupId}/join
 
 Requests to join a group. Behavior depends on the group's `joinPolicy` (§5.2):
 
 * `open` → the caller becomes a member immediately. **Response (`201 Created`):** the `Member`.
-* `request` → a pending request is recorded. **Response (`202 Accepted`):** the `JoinRequest`. An optional `{ "message": "…" }` body may accompany the request.
+* `request` → a pending request is recorded. **Response (`202 Accepted`):** the `JoinRequest`. An optional `{ "message": "…" }` body may accompany the request. If the caller already has a **pending** request for the group, the provider **MUST** answer `202` with that existing `JoinRequest`, unchanged (its `message` is not replaced), and record nothing new (idempotent). A denied request does not block a new one: a deny is not a ban (§13), so a later join records a new pending request.
 * `invite` → **`403 Forbidden`**; the caller must redeem an invite (§5.6).
 * A `private`-tier group always behaves as `invite`, whatever its `joinPolicy` (§11).
 * Already a member → **`200 OK`** with the existing `Member` (idempotent).
@@ -1045,11 +1054,13 @@ The caller may be local or remote (§8.2); a remote actor joins by signing this 
 
 #### POST /api/groups/{groupId}/leave
 
-Removes the caller's own membership. **Response:** `204 No Content`. The `owner` **MUST** transfer ownership (via a role change) before leaving; otherwise the provider **MUST** reject with `409`.
+Removes the caller's own membership. **Response:** `204 No Content`. The `owner` **MUST** transfer ownership (via a role change) before leaving; otherwise the provider **MUST** reject with `409`. A caller who is not a member gets **`404`**.
 
 #### GET /api/groups/{groupId}/members
 
-Lists members. **Authorization:** visible to group members; for `public`/`discoverable` groups providers **MAY** expose it to non-members. Members who have hidden their membership (§6) **MAY** be omitted for unauthorized viewers. Paginated per §7.2. **Errors:** `404` (no such group); `403` when a signed caller may not see the list (a non-member, unless the provider exposes the list to non-members); `401` for a signed request that fails §4.5. This route is not among the anonymous-reader routes of §4.5: an unsigned request gets `401` (§4.5 step 1).
+Lists members. The `owner` is listed as a member with role `owner`. A member's `joinedAt` is when the user became a member: for the creator, the group's `createdAt`. A role change, an ownership transfer included, leaves `joinedAt` unchanged for both members. The order of `items` is provider-defined, but it **MUST** be stable, so that paging through the list with §7.2 cursors neither skips nor repeats a member who stays in the group throughout.
+
+**Authorization:** visible to group members; for `public`/`discoverable` groups providers **MAY** expose it to non-members. Members who have hidden their membership (§6) **MAY** be omitted for unauthorized viewers. Paginated per §7.2. **Errors:** `404` (no such group); `403` when a signed caller may not see the list (a non-member, unless the provider exposes the list to non-members); `401` for a signed request that fails §4.5. This route is not among the anonymous-reader routes of §4.5: an unsigned request gets `401` (§4.5 step 1).
 
 **Response (`200 OK`):**
 ```json
@@ -1072,7 +1083,7 @@ Sets or clears a member's `displayNameOverride`. **Request:** `{ "displayNameOve
 
 #### `member.updated` event
 
-Whenever a member's `displayNameOverride` or `role` changes, the provider emits `member.updated` with `{ "groupId", "member": Member }` to every live subscription on the group's channels and to the affected member's own connections, so clients can update member lists and author names without re-fetching:
+Whenever a member's `displayNameOverride` or `role` changes, the provider emits `member.updated` with `{ "groupId", "member": Member }` to every live subscription on the group's channels and to the affected member's own connections, so clients can update member lists and author names without re-fetching. An ownership transfer changes two roles, so it emits `member.updated` for **both** members. Nothing else emits it: there is no `member.joined` or `member.left` event, and joins, leaves and kicks emit no event on the group's channels. A membership the provider hosts that is created or ends does change that user's group list, so the provider emits `groups.updated` to the user's own connections when it is also their home provider (*My groups*, below):
 
 ```json
 { "id": "evt_700", "type": "member.updated", "ts": "2026-02-01T10:00:00Z", "data": { "groupId": "grp_1", "member": { "user": "ada@a.com", "role": "member", "joinedAt": "2026-01-01T12:00:00Z", "displayNameOverride": "Ada (mod)" } } }
@@ -1080,9 +1091,11 @@ Whenever a member's `displayNameOverride` or `role` changes, the provider emits 
 
 #### Join requests (for `request` policy)
 
-* `GET /api/groups/{groupId}/requests` — list pending `JoinRequest`s. **Authorization:** group `manage` or `moderate` role.
-* `POST /api/groups/{groupId}/requests/{requestId}/approve` — approve; creates the membership. **Response (`200 OK`):** the new `Member`.
-* `POST /api/groups/{groupId}/requests/{requestId}/deny` — deny. **Response:** `204 No Content`.
+All three endpoints require the group `manage` or `moderate` role. The subset rule (§5.7) does not apply to approve or deny: the approved member always gets role **`member`**, because it is the group's join policy, not the approver, that grants the role. A manager who wants another role for them changes it afterwards (`PATCH …/members/{userRef}`, which the subset rule binds).
+
+* `GET /api/groups/{groupId}/requests` — list pending `JoinRequest`s.
+* `POST /api/groups/{groupId}/requests/{requestId}/approve` — approve; creates the membership with role `member` and marks the request `approved`. **Response (`200 OK`):** the new `Member`. If the requester is already a member (for example through an invite), the provider marks the request `approved` and answers `200` with the existing `Member`, unchanged.
+* `POST /api/groups/{groupId}/requests/{requestId}/deny` — deny; marks the request `denied`. **Response:** `204 No Content`. A deny is not a ban (§13): the user may join again, which records a new pending request.
 
 #### My groups: membership pointers at home
 
@@ -2662,6 +2675,11 @@ Access is evaluated continuously, not only at subscription time; see §7.1 *Losi
 - [ ] Reject a keys response whose `actor` is not the requested actor, and a discovery document whose `provider.domain` is not the authority it was fetched from (§3.1, §4.6); answer `403` for a denied signer and `401` when the outbound-request rules forbid the fetch (§4.6, §8)
 - [ ] Support group and channel management (create/read/update/delete) with the permission model (§5.5)
 - [ ] Support group membership: join/leave, member listing, roles, per-group nicknames, `member.updated`, and the `request` approval flow (§5.7)
+- [ ] List the owner among the members with role `owner`, keep `joinedAt` across role changes and ownership transfers, and keep the member list's order stable for cursor paging (§5.7)
+- [ ] Answer a repeat `join` under the `request` policy with `202` and the caller's existing pending `JoinRequest`, unchanged; answer `leave` from a non-member with `404` (and from the owner with `409`) (§5.7)
+- [ ] Gate join-request approve and deny on `manage` or `moderate`, without the subset rule; give an approved requester role `member`, and answer an approval for someone already a member with `200` and the existing `Member`, marking the request `approved` (§5.7)
+- [ ] On invite creation, reject a `role` that is `owner` or neither canonical nor in the group's `roles`, and a `channelId` that is not a channel of the group, with `400`, and an invite whose role holds a permission the creator lacks with `403` (§5.6)
+- [ ] Answer `redeem` by a caller who is already a member (the owner included) with `200` and their current role, changing no role and consuming no use of the invite (§5.6)
 - [ ] Support message creation of every type (`message`, `memo`, `article`) with `attachments`, `reference`, `tags` and `metadata`, over both `message.create` and `POST …/messages`, gated by `post:<type>` and by `replyOnly` / `replyOnlyTo` (which only a valid reply, `reference.type` `"reply"` naming an existing message in the channel, satisfies), answering `404` for a channel the actor cannot read (§5.2.1, §7.1)
 - [ ] Treat `(author, channelId, clientMessageId)` as idempotent, running only authentication, visibility and the actor's permission checks before the duplicate lookup and returning the existing message on a duplicate (over WebSocket as a `message.created` with no `cursor`); echo `clientMessageId` on the author's `message.created`, live or replayed, and on every create response (§7.1, §7.4)
 - [ ] Carry the full canonical `Message` in `message.created`, `message.updated` and `dm.message` (§7.1, §7.4)
